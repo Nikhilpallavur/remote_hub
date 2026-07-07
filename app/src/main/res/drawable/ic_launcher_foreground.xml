@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- D-pad cross: two overlapping white capsules. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M48,36 A6,6 0 0 1 60,36 L60,72 A6,6 0 0 1 48,72 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,48 L72,48 A6,6 0 0 1 72,60 L36,60 A6,6 0 0 1 36,48 Z" />
+    <!-- Centre button. -->
+    <path
+        android:fillColor="#123F8F"
+        android:pathData="M54,54 m-7,0 a7,7 0 1,1 14,0 a7,7 0 1,1 -14,0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,54 m-3.5,0 a3.5,3.5 0 1,1 7,0 a3.5,3.5 0 1,1 -7,0" />
+    <!-- Signal arcs radiating to the north-east. -->
+    <path
+        android:strokeColor="#FFB95C"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:pathData="M66,36 A9,9 0 0 1 74,44" />
+    <path
+        android:strokeColor="#FFB95C"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:pathData="M70,30 A14,14 0 0 1 82,42" />
+</vector>

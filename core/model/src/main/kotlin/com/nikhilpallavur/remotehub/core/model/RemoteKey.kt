@@ -1,0 +1,52 @@
+package com.nikhilpallavur.remotehub.core.model
+
+/**
+ * The universal, transport-agnostic set of discrete button presses the UI can request.
+ * Each driver maps the subset it supports onto its own wire codes (Android TV key-codes,
+ * Roku ECP names, Samsung/LG strings, IR frames). Keys a driver cannot express are simply
+ * reported as unsupported, so a control never appears for a device that cannot honour it.
+ */
+enum class RemoteKey {
+    POWER,
+    POWER_ON,
+    POWER_OFF,
+    HOME,
+    BACK,
+    MENU,
+    GUIDE,
+    INFO,
+    INPUT_SOURCE,
+    SETTINGS,
+    SEARCH,
+    DPAD_UP,
+    DPAD_DOWN,
+    DPAD_LEFT,
+    DPAD_RIGHT,
+    DPAD_CENTER,
+    VOLUME_UP,
+    VOLUME_DOWN,
+    MUTE,
+    CHANNEL_UP,
+    CHANNEL_DOWN,
+    PLAY_PAUSE,
+    PLAY,
+    PAUSE,
+    STOP,
+    REWIND,
+    FAST_FORWARD,
+    NEXT,
+    PREVIOUS,
+    NUM_0,
+    NUM_1,
+    NUM_2,
+    NUM_3,
+    NUM_4,
+    NUM_5,
+    NUM_6,
+    NUM_7,
+    NUM_8,
+    NUM_9,
+    NETFLIX,
+    YOUTUBE,
+    PRIME_VIDEO,
+}
