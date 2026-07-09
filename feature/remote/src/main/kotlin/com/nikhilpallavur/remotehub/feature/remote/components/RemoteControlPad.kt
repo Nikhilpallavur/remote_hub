@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,41 +24,37 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Keyboard
-import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Dialpad
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.VolumeDown
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,14 +63,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.nikhilpallavur.remotehub.core.designsystem.motion.Motion
-import com.nikhilpallavur.remotehub.core.designsystem.motion.rememberPressFeedback
 import com.nikhilpallavur.remotehub.core.designsystem.theme.Spacing
 import com.nikhilpallavur.remotehub.core.model.DeviceCapability
 import com.nikhilpallavur.remotehub.core.model.RemoteKey
@@ -82,8 +82,13 @@ import kotlin.math.abs
 
 /**
  * The dynamic remote. It renders one section per [capabilities] entry, so the layout is generated
- * from the connected device's declared abilities — a TV shows a D-pad and channels, while a
+ * from the connected device's declared abilities — a TV shows the neumorphic remote face, while a
  * TEMPERATURE-capable device gets the climate remote, with no per-driver branching here.
+ *
+ * The TV face is styled as a soft-neumorphic physical remote (fixed dark palette in [Neu]) and is
+ * sized to fit one screen: D-pad between slim volume/channel rockers, and the space-hungry
+ * surfaces (touchpad, wireless keyboard, number pad) behind utility buttons that open bottom
+ * sheets.
  */
 @Composable
 fun RemoteControlPad(
@@ -104,144 +109,200 @@ fun RemoteControlPad(
         if (DeviceCapability.TEMPERATURE in capabilities && climateActions != null) {
             ClimateRemote(capabilities, climate, temperatureRangeC, climateActions)
         } else {
-            if (DeviceCapability.POWER in capabilities) PowerRow(onKey)
-            if (DeviceCapability.DPAD in capabilities) DirectionPad(onKey)
-            if (DeviceCapability.TOUCHPAD in capabilities) TouchpadSection(onKey)
-            if (DeviceCapability.VOLUME in capabilities || DeviceCapability.CHANNEL in capabilities) {
-                RockerRow(capabilities, onKey)
+            TvRemoteLayout(capabilities, onKey, onText)
+        }
+    }
+}
+
+/** Which full-screen surface is open in the bottom sheet, if any. */
+private enum class RemoteSheet { TOUCHPAD, KEYBOARD, NUMBER_PAD }
+
+@Composable
+private fun TvRemoteLayout(
+    capabilities: Set<DeviceCapability>,
+    onKey: (RemoteKey) -> Unit,
+    onText: (String) -> Unit,
+) {
+    var sheet by remember { mutableStateOf<RemoteSheet?>(null) }
+
+    UtilityRow(capabilities, onKey, onOpenSheet = { sheet = it })
+    if (DeviceCapability.DPAD in capabilities) NavRow(onKey)
+    if (
+        DeviceCapability.DPAD in capabilities ||
+        DeviceCapability.VOLUME in capabilities ||
+        DeviceCapability.CHANNEL in capabilities
+    ) {
+        ControlCluster(capabilities, onKey)
+    }
+    if (DeviceCapability.MEDIA in capabilities) MediaRow(onKey)
+    if (DeviceCapability.APP_SHORTCUTS in capabilities) AppShortcutRow(onKey)
+
+    sheet?.let { active ->
+        RemoteSheetHost(active, onKey, onText, onDismiss = { sheet = null })
+    }
+}
+
+/**
+ * Power on the left; on the right, one launcher per collapsed surface (number pad, keyboard,
+ * touchpad) and the AV input toggle — so the main remote face never scrolls.
+ */
+@Composable
+private fun UtilityRow(
+    capabilities: Set<DeviceCapability>,
+    onKey: (RemoteKey) -> Unit,
+    onOpenSheet: (RemoteSheet) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = Spacing.xs),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (DeviceCapability.POWER in capabilities) {
+            NeuButton(
+                onClick = { onKey(RemoteKey.POWER) },
+                label = "Power",
+                modifier = Modifier.size(60.dp),
+            ) {
+                Icon(
+                    Icons.Filled.PowerSettingsNew,
+                    contentDescription = "Power",
+                    tint = Neu.PowerRed,
+                    modifier = Modifier.size(26.dp),
+                )
             }
-            if (DeviceCapability.MEDIA in capabilities) MediaRow(onKey)
-            if (DeviceCapability.NUMBER_PAD in capabilities) NumberPad(onKey)
-            if (DeviceCapability.APP_SHORTCUTS in capabilities) AppShortcuts(onKey)
-            if (DeviceCapability.TEXT_INPUT in capabilities) KeyboardSection(onText)
+        }
+        Spacer(Modifier.weight(1f))
+        if (DeviceCapability.NUMBER_PAD in capabilities) {
+            UtilityButton(Icons.Filled.Dialpad, "Number pad") { onOpenSheet(RemoteSheet.NUMBER_PAD) }
+        }
+        if (DeviceCapability.TEXT_INPUT in capabilities) {
+            UtilityButton(Icons.Filled.Keyboard, "Keyboard") { onOpenSheet(RemoteSheet.KEYBOARD) }
+        }
+        if (DeviceCapability.TOUCHPAD in capabilities) {
+            UtilityButton(Icons.Filled.TouchApp, "Touchpad") { onOpenSheet(RemoteSheet.TOUCHPAD) }
+        }
+        NeuButton(
+            onClick = { onKey(RemoteKey.INPUT_SOURCE) },
+            label = "Input source",
+            modifier = Modifier.size(46.dp),
+        ) {
+            Text(
+                "AV",
+                color = Neu.Content,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+            )
         }
     }
 }
 
 @Composable
-private fun PowerRow(onKey: (RemoteKey) -> Unit) {
+private fun UtilityButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+    NeuButton(onClick = onClick, label = label, modifier = Modifier.size(46.dp)) {
+        Icon(icon, contentDescription = label, tint = Neu.ContentDim, modifier = Modifier.size(21.dp))
+    }
+}
+
+@Composable
+private fun NavRow(onKey: (RemoteKey) -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.xs),
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FilledTonalIconButton(onClick = { onKey(RemoteKey.MENU) }, modifier = Modifier.size(52.dp)) {
-            Icon(Icons.Filled.Menu, contentDescription = "Menu")
+        NavButton(Icons.Filled.ArrowBack, "Back") { onKey(RemoteKey.BACK) }
+        NavButton(Icons.Filled.Home, "Home") { onKey(RemoteKey.HOME) }
+        NavButton(Icons.Filled.Search, "Search") { onKey(RemoteKey.SEARCH) }
+        NavButton(Icons.Filled.Menu, "Menu") { onKey(RemoteKey.MENU) }
+    }
+}
+
+@Composable
+private fun NavButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+    NeuButton(onClick = onClick, label = label, modifier = Modifier.size(54.dp)) {
+        Icon(icon, contentDescription = label, tint = Neu.Content, modifier = Modifier.size(23.dp))
+    }
+}
+
+/** The heart of the remote: slim VOL / CH rockers flanking the circular D-pad, one shared row. */
+@Composable
+private fun ControlCluster(capabilities: Set<DeviceCapability>, onKey: (RemoteKey) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (DeviceCapability.VOLUME in capabilities) {
+            RockerPill(
+                label = "VOL",
+                topIcon = Icons.Filled.Add,
+                bottomIcon = Icons.Filled.Remove,
+                onTop = { onKey(RemoteKey.VOLUME_UP) },
+                onBottom = { onKey(RemoteKey.VOLUME_DOWN) },
+                onMiddle = { onKey(RemoteKey.MUTE) },
+                middleIcon = Icons.Filled.VolumeOff,
+            )
         }
-        val press = rememberPressFeedback()
-        FilledIconButton(
-            onClick = { onKey(RemoteKey.POWER) },
-            interactionSource = press.interactionSource,
-            modifier = press.modifier.size(72.dp),
-            shape = CircleShape,
-            colors = IconButtonDefaults.filledIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-            ),
-        ) {
-            Icon(Icons.Filled.PowerSettingsNew, contentDescription = "Power", modifier = Modifier.size(32.dp))
+        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            if (DeviceCapability.DPAD in capabilities) DirectionPad(onKey)
         }
-        FilledTonalIconButton(onClick = { onKey(RemoteKey.HOME) }, modifier = Modifier.size(52.dp)) {
-            Icon(Icons.Filled.Home, contentDescription = "Home")
+        if (DeviceCapability.CHANNEL in capabilities) {
+            RockerPill(
+                label = "CH",
+                topIcon = Icons.Filled.KeyboardArrowUp,
+                bottomIcon = Icons.Filled.KeyboardArrowDown,
+                onTop = { onKey(RemoteKey.CHANNEL_UP) },
+                onBottom = { onKey(RemoteKey.CHANNEL_DOWN) },
+                onMiddle = null,
+                middleIcon = null,
+            )
         }
     }
 }
 
 @Composable
 private fun DirectionPad(onKey: (RemoteKey) -> Unit) {
-    SectionCard {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = Spacing.sm),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            TextButton(onClick = { onKey(RemoteKey.BACK) }) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
-                Spacer(Modifier.width(Spacing.xs))
-                Text("Back")
-            }
-            TextButton(onClick = { onKey(RemoteKey.HOME) }) {
-                Text("Home")
-                Spacer(Modifier.width(Spacing.xs))
-                Icon(Icons.Filled.Home, contentDescription = null)
-            }
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .padding(Spacing.sm),
-            contentAlignment = Alignment.Center,
-        ) {
-            DpadButton(Icons.Filled.KeyboardArrowUp, "Up", Modifier.align(Alignment.TopCenter)) {
-                onKey(RemoteKey.DPAD_UP)
-            }
-            DpadButton(Icons.Filled.KeyboardArrowDown, "Down", Modifier.align(Alignment.BottomCenter)) {
-                onKey(RemoteKey.DPAD_DOWN)
-            }
-            DpadButton(Icons.Filled.KeyboardArrowLeft, "Left", Modifier.align(Alignment.CenterStart)) {
-                onKey(RemoteKey.DPAD_LEFT)
-            }
-            DpadButton(Icons.Filled.KeyboardArrowRight, "Right", Modifier.align(Alignment.CenterEnd)) {
-                onKey(RemoteKey.DPAD_RIGHT)
-            }
-            FilledIconButton(
-                onClick = { onKey(RemoteKey.DPAD_CENTER) },
-                modifier = Modifier.size(84.dp),
-                shape = CircleShape,
-            ) {
-                Text("OK", fontWeight = FontWeight.SemiBold)
-            }
-        }
-    }
-}
-
-@Composable
-private fun DpadButton(icon: ImageVector, label: String, modifier: Modifier, onClick: () -> Unit) {
-    val press = rememberPressFeedback()
-    IconButton(
-        onClick = onClick,
-        interactionSource = press.interactionSource,
-        modifier = modifier.size(64.dp).then(press.modifier),
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .neuRaised()
+            .clip(CircleShape)
+            .background(neuSurfaceBrush()),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = label, modifier = Modifier.size(36.dp))
-    }
-}
-
-@Composable
-private fun RockerRow(capabilities: Set<DeviceCapability>, onKey: (RemoteKey) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().height(200.dp),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
-    ) {
-        if (DeviceCapability.VOLUME in capabilities) {
-            RockerColumn(
-                label = "VOL",
-                topIcon = Icons.Filled.VolumeUp,
-                bottomIcon = Icons.Filled.VolumeDown,
-                onTop = { onKey(RemoteKey.VOLUME_UP) },
-                onBottom = { onKey(RemoteKey.VOLUME_DOWN) },
-                onMiddle = { onKey(RemoteKey.MUTE) },
-                middleIcon = Icons.Filled.VolumeOff,
-                modifier = Modifier.weight(1f),
-            )
+        DpadArrow(Icons.Filled.KeyboardArrowUp, "Up", Modifier.align(Alignment.TopCenter)) {
+            onKey(RemoteKey.DPAD_UP)
         }
-        if (DeviceCapability.CHANNEL in capabilities) {
-            RockerColumn(
-                label = "CH",
-                topIcon = Icons.Filled.Add,
-                bottomIcon = Icons.Filled.Remove,
-                onTop = { onKey(RemoteKey.CHANNEL_UP) },
-                onBottom = { onKey(RemoteKey.CHANNEL_DOWN) },
-                onMiddle = null,
-                middleIcon = null,
-                modifier = Modifier.weight(1f),
-            )
+        DpadArrow(Icons.Filled.KeyboardArrowDown, "Down", Modifier.align(Alignment.BottomCenter)) {
+            onKey(RemoteKey.DPAD_DOWN)
+        }
+        DpadArrow(Icons.Filled.KeyboardArrowLeft, "Left", Modifier.align(Alignment.CenterStart)) {
+            onKey(RemoteKey.DPAD_LEFT)
+        }
+        DpadArrow(Icons.Filled.KeyboardArrowRight, "Right", Modifier.align(Alignment.CenterEnd)) {
+            onKey(RemoteKey.DPAD_RIGHT)
+        }
+        NeuButton(
+            onClick = { onKey(RemoteKey.DPAD_CENTER) },
+            label = "OK",
+            modifier = Modifier.size(64.dp),
+        ) {
+            Text("OK", color = Neu.Content, fontWeight = FontWeight.SemiBold)
         }
     }
 }
 
 @Composable
-private fun RockerColumn(
+private fun DpadArrow(icon: ImageVector, label: String, modifier: Modifier, onClick: () -> Unit) {
+    // Arrows sit on the shared pad surface, so they're flat hit areas rather than raised buttons.
+    IconButton(onClick = onClick, modifier = modifier.size(56.dp)) {
+        Icon(icon, contentDescription = label, tint = Neu.Content, modifier = Modifier.size(30.dp))
+    }
+}
+
+@Composable
+private fun RockerPill(
     label: String,
     topIcon: ImageVector,
     bottomIcon: ImageVector,
@@ -249,123 +310,151 @@ private fun RockerColumn(
     onBottom: () -> Unit,
     onMiddle: (() -> Unit)?,
     middleIcon: ImageVector?,
-    modifier: Modifier = Modifier,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    Column(
+        modifier = Modifier
+            .width(56.dp)
+            .neuRaised(cornerRadius = 28.dp)
+            .clip(RoundedCornerShape(28.dp))
+            .background(neuSurfaceBrush())
+            .padding(vertical = Spacing.sm),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(Spacing.sm),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            IconButton(onClick = onTop, modifier = Modifier.size(56.dp)) {
-                Icon(topIcon, contentDescription = "$label up", modifier = Modifier.size(30.dp))
+        IconButton(onClick = onTop, modifier = Modifier.size(44.dp)) {
+            Icon(topIcon, contentDescription = "$label up", tint = Neu.Content, modifier = Modifier.size(24.dp))
+        }
+        if (onMiddle != null && middleIcon != null) {
+            IconButton(onClick = onMiddle, modifier = Modifier.size(36.dp)) {
+                Icon(middleIcon, contentDescription = "Mute", tint = Neu.ContentDim, modifier = Modifier.size(20.dp))
             }
-            if (onMiddle != null && middleIcon != null) {
-                IconButton(onClick = onMiddle) {
-                    Icon(middleIcon, contentDescription = "Mute")
-                }
-            } else {
-                Text(label, style = MaterialTheme.typography.labelMedium)
+        } else {
+            Box(modifier = Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+                Text(label, color = Neu.ContentDim, style = MaterialTheme.typography.labelMedium)
             }
-            IconButton(onClick = onBottom, modifier = Modifier.size(56.dp)) {
-                Icon(bottomIcon, contentDescription = "$label down", modifier = Modifier.size(30.dp))
-            }
+        }
+        IconButton(onClick = onBottom, modifier = Modifier.size(44.dp)) {
+            Icon(bottomIcon, contentDescription = "$label down", tint = Neu.Content, modifier = Modifier.size(24.dp))
         }
     }
 }
 
 @Composable
 private fun MediaRow(onKey: (RemoteKey) -> Unit) {
-    SectionCard {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = { onKey(RemoteKey.PREVIOUS) }) {
-                Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous")
-            }
-            IconButton(onClick = { onKey(RemoteKey.REWIND) }) {
-                Icon(Icons.Filled.FastRewind, contentDescription = "Rewind")
-            }
-            FilledTonalIconButton(
-                onClick = { onKey(RemoteKey.PLAY_PAUSE) },
-                modifier = Modifier.size(56.dp),
-            ) {
-                Icon(Icons.Filled.PlayArrow, contentDescription = "Play/Pause")
-            }
-            IconButton(onClick = { onKey(RemoteKey.FAST_FORWARD) }) {
-                Icon(Icons.Filled.FastForward, contentDescription = "Fast forward")
-            }
-            IconButton(onClick = { onKey(RemoteKey.NEXT) }) {
-                Icon(Icons.Filled.SkipNext, contentDescription = "Next")
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = Spacing.sm),
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            TextButton(onClick = { onKey(RemoteKey.STOP) }) {
-                Icon(Icons.Filled.Stop, contentDescription = null)
-                Spacer(Modifier.width(Spacing.xs))
-                Text("Stop")
-            }
-        }
-    }
-}
-
-@Composable
-private fun NumberPad(onKey: (RemoteKey) -> Unit) {
-    val numberKeys = listOf(
-        RemoteKey.NUM_1, RemoteKey.NUM_2, RemoteKey.NUM_3,
-        RemoteKey.NUM_4, RemoteKey.NUM_5, RemoteKey.NUM_6,
-        RemoteKey.NUM_7, RemoteKey.NUM_8, RemoteKey.NUM_9,
-    )
-    SectionCard {
-        numberKeys.chunked(3).forEach { rowKeys ->
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.xs),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                rowKeys.forEach { key -> NumberButton(key.name.removePrefix("NUM_"), key, onKey) }
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.xs),
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            NumberButton("0", RemoteKey.NUM_0, onKey)
-        }
-    }
-}
-
-@Composable
-private fun NumberButton(label: String, key: RemoteKey, onKey: (RemoteKey) -> Unit) {
-    FilledTonalIconButton(onClick = { onKey(key) }, modifier = Modifier.size(60.dp)) {
-        Text(label, style = MaterialTheme.typography.titleLarge)
-    }
-}
-
-@Composable
-private fun AppShortcuts(onKey: (RemoteKey) -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        AppChip("Netflix", RemoteKey.NETFLIX, onKey, Modifier.weight(1f))
-        AppChip("YouTube", RemoteKey.YOUTUBE, onKey, Modifier.weight(1f))
-        AppChip("Prime", RemoteKey.PRIME_VIDEO, onKey, Modifier.weight(1f))
+        MediaButton(Icons.Filled.SkipPrevious, "Previous") { onKey(RemoteKey.PREVIOUS) }
+        MediaButton(Icons.Filled.FastRewind, "Rewind") { onKey(RemoteKey.REWIND) }
+        NeuButton(
+            onClick = { onKey(RemoteKey.PLAY_PAUSE) },
+            label = "Play or pause",
+            modifier = Modifier.size(56.dp),
+        ) {
+            Icon(
+                Icons.Filled.PlayArrow,
+                contentDescription = "Play/Pause",
+                tint = Neu.Content,
+                modifier = Modifier.size(26.dp),
+            )
+        }
+        MediaButton(Icons.Filled.FastForward, "Fast forward") { onKey(RemoteKey.FAST_FORWARD) }
+        MediaButton(Icons.Filled.SkipNext, "Next") { onKey(RemoteKey.NEXT) }
     }
 }
 
 @Composable
-private fun AppChip(label: String, key: RemoteKey, onKey: (RemoteKey) -> Unit, modifier: Modifier) {
-    FilledTonalButton(onClick = { onKey(key) }, modifier = modifier) {
-        Text(label, maxLines = 1)
+private fun MediaButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+    NeuButton(onClick = onClick, label = label, modifier = Modifier.size(48.dp)) {
+        Icon(icon, contentDescription = label, tint = Neu.ContentDim, modifier = Modifier.size(22.dp))
+    }
+}
+
+/** One app shortcut: launch key, brand background, and either a glyph or a small icon. */
+private data class BrandApp(
+    val label: String,
+    val key: RemoteKey,
+    val background: Color,
+    val glyph: String,
+    val glyphColor: Color,
+    val icon: ImageVector? = null,
+)
+
+private val BRAND_APPS = listOf(
+    BrandApp("Netflix", RemoteKey.NETFLIX, Color(0xFF141414), "N", Color(0xFFE50914)),
+    BrandApp("YouTube", RemoteKey.YOUTUBE, Color(0xFFFF0000), "", Color.White, Icons.Filled.PlayArrow),
+    BrandApp("Prime Video", RemoteKey.PRIME_VIDEO, Color(0xFF00A8E1), "P", Color.White),
+    BrandApp("Disney+", RemoteKey.DISNEY_PLUS, Color(0xFF113CCF), "D+", Color.White),
+    BrandApp("JioHotstar", RemoteKey.HOTSTAR, Color(0xFF0B1F65), "★", Color(0xFFFFC107)),
+    BrandApp("Spotify", RemoteKey.SPOTIFY, Color(0xFF1DB954), "S", Color(0xFF0E0E0E)),
+    BrandApp("Apple TV", RemoteKey.APPLE_TV, Color(0xFF000000), "tv", Color.White),
+)
+
+@Composable
+private fun AppShortcutRow(onKey: (RemoteKey) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BRAND_APPS.forEach { app ->
+            NeuButton(
+                onClick = { onKey(app.key) },
+                label = app.label,
+                modifier = Modifier.size(42.dp),
+                background = SolidColor(app.background),
+            ) {
+                if (app.icon != null) {
+                    Icon(
+                        app.icon,
+                        contentDescription = app.label,
+                        tint = app.glyphColor,
+                        modifier = Modifier.size(24.dp),
+                    )
+                } else {
+                    Text(
+                        app.glyph,
+                        color = app.glyphColor,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Black,
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ---------------- Bottom sheets ----------------
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RemoteSheetHost(
+    sheet: RemoteSheet,
+    onKey: (RemoteKey) -> Unit,
+    onText: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Neu.Background,
+        contentColor = Neu.Content,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.md)
+                .padding(bottom = Spacing.lg)
+                .navigationBarsPadding()
+                .imePadding(),
+        ) {
+            when (sheet) {
+                RemoteSheet.TOUCHPAD -> TouchpadSurface(onKey)
+                RemoteSheet.KEYBOARD -> KeyboardInput(onText)
+                RemoteSheet.NUMBER_PAD -> NumberPadGrid(onKey)
+            }
+        }
     }
 }
 
@@ -377,84 +466,80 @@ private fun AppChip(label: String, key: RemoteKey, onKey: (RemoteKey) -> Unit, m
  * presses, so it works on every driver that already supports the D-pad — no new wire protocol.
  */
 @Composable
-private fun TouchpadSection(onKey: (RemoteKey) -> Unit) {
+private fun TouchpadSurface(onKey: (RemoteKey) -> Unit) {
     val stepPx = with(LocalDensity.current) { TOUCHPAD_STEP_DP.dp.toPx() }
-    SectionCard {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.TouchApp, contentDescription = null, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(Spacing.xs))
-            Text("Touchpad", style = MaterialTheme.typography.titleMedium)
-        }
-        Spacer(Modifier.height(Spacing.sm))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(220.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .pointerInput(Unit) {
-                    var accX = 0f
-                    var accY = 0f
-                    detectDragGestures(
-                        onDragStart = { accX = 0f; accY = 0f },
-                        onDragEnd = { accX = 0f; accY = 0f },
-                        onDragCancel = { accX = 0f; accY = 0f },
-                    ) { change, drag ->
-                        change.consume()
-                        accX += drag.x
-                        accY += drag.y
-                        // Emit one D-pad step per [stepPx] travelled along the dominant axis; the
-                        // off-axis remainder is dropped so a mostly-horizontal swipe never leaks
-                        // stray vertical presses (and vice-versa).
-                        while (abs(accX) >= stepPx || abs(accY) >= stepPx) {
-                            if (abs(accX) >= abs(accY)) {
-                                if (accX > 0) { onKey(RemoteKey.DPAD_RIGHT); accX -= stepPx }
-                                else { onKey(RemoteKey.DPAD_LEFT); accX += stepPx }
-                                accY = 0f
-                            } else {
-                                if (accY > 0) { onKey(RemoteKey.DPAD_DOWN); accY -= stepPx }
-                                else { onKey(RemoteKey.DPAD_UP); accY += stepPx }
-                                accX = 0f
-                            }
+    Text("Touchpad", style = MaterialTheme.typography.titleMedium, color = Neu.Content)
+    Spacer(Modifier.height(Spacing.sm))
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(320.dp)
+            .neuRaised(cornerRadius = 24.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(neuSurfaceBrush())
+            .pointerInput(Unit) {
+                var accX = 0f
+                var accY = 0f
+                detectDragGestures(
+                    onDragStart = { accX = 0f; accY = 0f },
+                    onDragEnd = { accX = 0f; accY = 0f },
+                    onDragCancel = { accX = 0f; accY = 0f },
+                ) { change, drag ->
+                    change.consume()
+                    accX += drag.x
+                    accY += drag.y
+                    // Emit one D-pad step per [stepPx] travelled along the dominant axis; the
+                    // off-axis remainder is dropped so a mostly-horizontal swipe never leaks
+                    // stray vertical presses (and vice-versa).
+                    while (abs(accX) >= stepPx || abs(accY) >= stepPx) {
+                        if (abs(accX) >= abs(accY)) {
+                            if (accX > 0) { onKey(RemoteKey.DPAD_RIGHT); accX -= stepPx }
+                            else { onKey(RemoteKey.DPAD_LEFT); accX += stepPx }
+                            accY = 0f
+                        } else {
+                            if (accY > 0) { onKey(RemoteKey.DPAD_DOWN); accY -= stepPx }
+                            else { onKey(RemoteKey.DPAD_UP); accY += stepPx }
+                            accX = 0f
                         }
                     }
                 }
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { onKey(RemoteKey.DPAD_CENTER) },
-                        onDoubleTap = { onKey(RemoteKey.BACK) },
-                        onLongPress = { onKey(RemoteKey.HOME) },
-                    )
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(
-                    Icons.Filled.TouchApp,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(Spacing.xs))
-                Text(
-                    "Swipe to move · Tap to select",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onKey(RemoteKey.DPAD_CENTER) },
+                    onDoubleTap = { onKey(RemoteKey.BACK) },
+                    onLongPress = { onKey(RemoteKey.HOME) },
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                Icons.Filled.TouchApp,
+                contentDescription = null,
+                modifier = Modifier.size(40.dp),
+                tint = Neu.ContentDim,
+            )
+            Spacer(Modifier.height(Spacing.xs))
+            Text(
+                "Swipe to move · Tap to select",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Neu.ContentDim,
+            )
         }
-        Spacer(Modifier.height(Spacing.xs))
-        Text(
-            "Double-tap · Back      Long-press · Home",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth().padding(top = Spacing.xs),
-        )
     }
+    Spacer(Modifier.height(Spacing.xs))
+    Text(
+        "Double-tap · Back      Long-press · Home",
+        style = MaterialTheme.typography.labelMedium,
+        color = Neu.ContentDim,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().padding(top = Spacing.xs),
+    )
 }
 
 @Composable
-private fun KeyboardSection(onText: (String) -> Unit) {
+private fun KeyboardInput(onText: (String) -> Unit) {
     var text by remember { mutableStateOf("") }
     val send = {
         if (text.isNotEmpty()) {
@@ -462,35 +547,61 @@ private fun KeyboardSection(onText: (String) -> Unit) {
             text = ""
         }
     }
-    SectionCard {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.Keyboard, contentDescription = null, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(Spacing.xs))
-            Text("Wireless keyboard", style = MaterialTheme.typography.titleMedium)
-        }
-        Spacer(Modifier.height(Spacing.sm))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                placeholder = { Text("Type here — sent to the TV") },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { send() }),
-                trailingIcon = {
-                    if (text.isNotEmpty()) {
-                        IconButton(onClick = { text = "" }) {
-                            Icon(Icons.Filled.Clear, contentDescription = "Clear")
-                        }
+    Text("Wireless keyboard", style = MaterialTheme.typography.titleMedium, color = Neu.Content)
+    Spacer(Modifier.height(Spacing.sm))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            modifier = Modifier.weight(1f),
+            singleLine = true,
+            placeholder = { Text("Type here — sent to the TV") },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(onSend = { send() }),
+            trailingIcon = {
+                if (text.isNotEmpty()) {
+                    IconButton(onClick = { text = "" }) {
+                        Icon(Icons.Filled.Clear, contentDescription = "Clear")
                     }
-                },
-            )
-            Spacer(Modifier.width(Spacing.sm))
-            FilledTonalIconButton(onClick = send, modifier = Modifier.size(56.dp)) {
-                Icon(Icons.Filled.Send, contentDescription = "Send text")
-            }
+                }
+            },
+        )
+        Spacer(Modifier.width(Spacing.sm))
+        FilledTonalIconButton(onClick = send, modifier = Modifier.size(56.dp)) {
+            Icon(Icons.Filled.Send, contentDescription = "Send text")
         }
+    }
+}
+
+@Composable
+private fun NumberPadGrid(onKey: (RemoteKey) -> Unit) {
+    val numberKeys = listOf(
+        RemoteKey.NUM_1, RemoteKey.NUM_2, RemoteKey.NUM_3,
+        RemoteKey.NUM_4, RemoteKey.NUM_5, RemoteKey.NUM_6,
+        RemoteKey.NUM_7, RemoteKey.NUM_8, RemoteKey.NUM_9,
+    )
+    Text("Number pad", style = MaterialTheme.typography.titleMedium, color = Neu.Content)
+    Spacer(Modifier.height(Spacing.md))
+    numberKeys.chunked(3).forEach { rowKeys ->
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.sm),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            rowKeys.forEach { key -> NumberButton(key.name.removePrefix("NUM_"), key, onKey) }
+        }
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.sm),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        NumberButton("0", RemoteKey.NUM_0, onKey)
+    }
+}
+
+@Composable
+private fun NumberButton(label: String, key: RemoteKey, onKey: (RemoteKey) -> Unit) {
+    NeuButton(onClick = { onKey(key) }, label = label, modifier = Modifier.size(60.dp)) {
+        Text(label, color = Neu.Content, style = MaterialTheme.typography.titleLarge)
     }
 }
 

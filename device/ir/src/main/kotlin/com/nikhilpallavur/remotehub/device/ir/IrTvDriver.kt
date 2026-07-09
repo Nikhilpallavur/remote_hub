@@ -26,11 +26,16 @@ class IrTvDriver @Inject constructor(
         displayName = "Infrared TV",
         category = DeviceCategory.TELEVISION,
         transport = Transport.INFRARED,
+        // The full TV face: D-pad and touchpad ride on the best-effort NEC navigation codes, so
+        // the IR TV opens the same remote UI as the Wi-Fi drivers (universal-remote semantics —
+        // keys a given set doesn't understand simply do nothing).
         capabilities = setOf(
             DeviceCapability.POWER,
+            DeviceCapability.DPAD,
             DeviceCapability.VOLUME,
             DeviceCapability.CHANNEL,
             DeviceCapability.NUMBER_PAD,
+            DeviceCapability.TOUCHPAD,
         ),
         pairingMode = null,
     )

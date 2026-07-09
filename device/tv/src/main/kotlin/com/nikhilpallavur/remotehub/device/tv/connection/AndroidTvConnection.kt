@@ -17,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -31,6 +32,7 @@ import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.security.cert.X509Certificate
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLHandshakeException
 import javax.net.ssl.SSLSocket
 
 /**
@@ -110,17 +112,53 @@ class AndroidTvConnection(
 
     private suspend fun openCommandChannel(device: RemoteDevice) {
         mutableState.value = ConnectionState.Connecting(device)
-        val socket = withContext(Dispatchers.IO) {
-            runCatching { openSocket(requireHost(device), COMMAND_PORT, 0) }.getOrNull()
+        val result = withContext(Dispatchers.IO) { connectCommandSocket(device) }
+        when (result) {
+            is CommandChannelResult.Open -> {
+                commandSocket = result.socket
+                loopJob = scope.launch { readCommandLoop(device, result.socket) }
+            }
+            CommandChannelResult.NotTrusted -> {
+                // The TV rejected our certificate during the TLS handshake — it has genuinely
+                // forgotten us, so a fresh pairing is the only way back in.
+                this.device = device.copy(paired = false)
+                startPairing(device.copy(paired = false))
+            }
+            is CommandChannelResult.Unreachable -> fail(
+                device,
+                "Couldn't reach ${device.name}. Make sure the TV is on and on the same Wi-Fi, " +
+                    "then tap it to reconnect. (${result.reason})",
+            )
         }
-        if (socket == null) {
-            // The TV no longer trusts our certificate — fall back to a fresh pairing.
-            this.device = device.copy(paired = false)
-            startPairing(device.copy(paired = false))
-            return
+    }
+
+    /**
+     * Opens the command socket with retries. TVs coming out of standby routinely drop or stall the
+     * first knock, so transient failures (refused, timed out, reset) are retried with a short
+     * backoff instead of being misread as "the TV forgot us" — only a TLS handshake rejection
+     * means our certificate is no longer trusted and a re-pair is required.
+     */
+    private suspend fun connectCommandSocket(device: RemoteDevice): CommandChannelResult {
+        var lastError: Throwable? = null
+        RETRY_BACKOFF_MS.forEachIndexed { attempt, backoffMs ->
+            try {
+                return CommandChannelResult.Open(openSocket(requireHost(device), COMMAND_PORT, 0))
+            } catch (error: SSLHandshakeException) {
+                Log.i(TAG, "command handshake rejected — TV no longer trusts us: ${error.message}")
+                return CommandChannelResult.NotTrusted
+            } catch (error: IOException) {
+                lastError = error
+                Log.d(TAG, "command connect attempt ${attempt + 1} failed: ${error.message}")
+                if (backoffMs > 0) delay(backoffMs)
+            }
         }
-        commandSocket = socket
-        loopJob = scope.launch { readCommandLoop(device, socket) }
+        return CommandChannelResult.Unreachable(lastError?.message ?: "no response")
+    }
+
+    private sealed interface CommandChannelResult {
+        data class Open(val socket: SSLSocket) : CommandChannelResult
+        data object NotTrusted : CommandChannelResult
+        data class Unreachable(val reason: String) : CommandChannelResult
     }
 
     private suspend fun readCommandLoop(device: RemoteDevice, socket: SSLSocket) {
@@ -230,8 +268,12 @@ class AndroidTvConnection(
     private fun openSocket(host: String, port: Int, timeoutMs: Int): SSLSocket {
         val socket = sslContext.socketFactory.createSocket() as SSLSocket
         socket.connect(InetSocketAddress(resolveHost(host), port), CONNECT_TIMEOUT_MS)
-        socket.soTimeout = timeoutMs
+        // A dozing TV can accept TCP and then stall the TLS handshake indefinitely; a bounded
+        // handshake read keeps reconnect from hanging forever. The caller's timeout only applies
+        // to the established channel (0 = block on the command read loop).
+        socket.soTimeout = HANDSHAKE_TIMEOUT_MS
         socket.startHandshake()
+        socket.soTimeout = timeoutMs
         return socket
     }
 
@@ -263,7 +305,9 @@ class AndroidTvConnection(
         const val PAIRING_PORT = 6467
         const val COMMAND_PORT = 6466
         const val CONNECT_TIMEOUT_MS = 8000
+        const val HANDSHAKE_TIMEOUT_MS = 5000
         const val PAIRING_TIMEOUT_MS = 15000
+        val RETRY_BACKOFF_MS = listOf(500L, 1000L, 2000L, 0L)
         const val SERVICE_NAME = "RemoteHub"
         const val DEVICE_MODEL = "RemoteHub"
         const val VENDOR = "RemoteHub"

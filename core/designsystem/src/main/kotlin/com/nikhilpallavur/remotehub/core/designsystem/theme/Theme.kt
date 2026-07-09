@@ -2,6 +2,7 @@ package com.nikhilpallavur.remotehub.core.designsystem.theme
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -61,6 +62,12 @@ private val DarkColors = darkColorScheme(
     onSurfaceVariant = GreyBlue80,
     outline = GreyBlue60,
 )
+
+/**
+ * The app's static dark scheme, for screens that commit to a dark look regardless of the system
+ * setting (the neumorphic remote face). Deliberately bypasses dynamic color so the skin is stable.
+ */
+fun remoteHubDarkColorScheme(): ColorScheme = DarkColors
 
 /**
  * The single theme entry point for the whole app. Honors the platform light/dark setting,

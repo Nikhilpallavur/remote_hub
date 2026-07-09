@@ -1,7 +1,33 @@
+import java.util.Properties
+
 plugins {
     id("remotehub.android.application")
     alias(libs.plugins.hilt)
     alias(libs.plugins.kotlin.kapt)
+}
+
+// Release signing is wired from a git-ignored keystore.properties so credentials
+// never enter version control; machines without it still build unsigned releases.
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+if (keystorePropertiesFile.exists()) {
+    val keystoreProperties = Properties().apply {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+    android {
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+        buildTypes {
+            release {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+    }
 }
 
 dependencies {

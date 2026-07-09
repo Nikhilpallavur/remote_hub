@@ -1,0 +1,7 @@
+{
+  // Stop the Java extension from importing/syncing this Gradle project.
+  // Its background syncs (JRE 21) race CLI and Android Studio builds and
+  // corrupt build-logic/build outputs. Android tooling owns this project.
+  "java.import.gradle.enabled": false,
+  "java.autobuild.enabled": false
+}

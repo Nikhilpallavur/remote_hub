@@ -11,3 +11,15 @@
 local.properties
 *.hprof
 .kotlin
+
+# Play Store Assets (generated manually for upload)
+/playstore_assets/
+
+# Gradle precompiled build-logic output
+/build-logic/bin/
+
+# Release signing — keep the keystore and its credentials out of version control
+*.jks
+*.keystore
+/keystore.properties
+*.aab

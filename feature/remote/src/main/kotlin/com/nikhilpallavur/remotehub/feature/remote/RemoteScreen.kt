@@ -14,19 +14,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,12 +39,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.style.TextAlign
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nikhilpallavur.remotehub.core.designsystem.motion.Motion
 import com.nikhilpallavur.remotehub.core.designsystem.theme.Spacing
+import com.nikhilpallavur.remotehub.core.designsystem.theme.remoteHubDarkColorScheme
 import com.nikhilpallavur.remotehub.core.drivers.DriverDescriptor
 import com.nikhilpallavur.remotehub.core.model.ClimateMode
+import com.nikhilpallavur.remotehub.core.model.ConnectionState
+import com.nikhilpallavur.remotehub.core.model.DeviceCapability
 import com.nikhilpallavur.remotehub.core.model.FanSpeed
 import com.nikhilpallavur.remotehub.core.model.PairingMode
 import com.nikhilpallavur.remotehub.core.model.RemoteDevice
@@ -51,6 +59,7 @@ import com.nikhilpallavur.remotehub.feature.remote.components.ConfirmOnDeviceDia
 import com.nikhilpallavur.remotehub.feature.remote.components.DeviceBrowser
 import com.nikhilpallavur.remotehub.feature.remote.components.HeroDeviceHeader
 import com.nikhilpallavur.remotehub.feature.remote.components.ManualAddDialog
+import com.nikhilpallavur.remotehub.feature.remote.components.Neu
 import com.nikhilpallavur.remotehub.feature.remote.components.PairingCodeDialog
 import com.nikhilpallavur.remotehub.feature.remote.components.RemoteControlPad
 
@@ -78,7 +87,7 @@ fun RemoteRoute(viewModel: RemoteViewModel = hiltViewModel()) {
     )
 }
 
-private enum class ScreenPhase { BROWSING, CONNECTING, CONNECTED }
+private enum class ScreenPhase { BROWSING, CONNECTING, CONNECTED, FAILED }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -101,7 +110,6 @@ fun RemoteScreen(
     onSetFanSpeed: (FanSpeed) -> Unit,
     onSetSwing: (Boolean) -> Unit,
 ) {
-    val snackbarHost = remember { SnackbarHostState() }
     var showManualAdd by remember { mutableStateOf(false) }
     val connected = state.connectedDevice
 
@@ -142,60 +150,83 @@ fun RemoteScreen(
         },
     )
 
-    LaunchedEffect(state.failure) {
-        state.failure?.let { snackbarHost.showSnackbar(it.reason) }
+    // The TV remote face is a fixed dark neumorphic skin, so the whole screen (top bar included)
+    // commits to the dark scheme while it's showing; browsing and the climate remote stay themed.
+    val neuRemote = connected != null && DeviceCapability.TEMPERATURE !in state.capabilities
+    val phase = when {
+        connected != null -> ScreenPhase.CONNECTED
+        state.connectingDevice != null -> ScreenPhase.CONNECTING
+        state.failure != null -> ScreenPhase.FAILED
+        else -> ScreenPhase.BROWSING
     }
-
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHost) },
-        topBar = {
-            TopAppBar(
-                title = { Text("RemoteHub") },
-                actions = {
-                    if (connected != null) {
-                        IconButton(onClick = onDisconnect) {
-                            Icon(Icons.Filled.Close, contentDescription = "Disconnect")
-                        }
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        val phase = when {
-            connected != null -> ScreenPhase.CONNECTED
-            state.connectingDevice != null -> ScreenPhase.CONNECTING
-            else -> ScreenPhase.BROWSING
-        }
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            AnimatedContent(
-                targetState = phase,
-                transitionSpec = {
-                    (
-                        fadeIn(tween(Motion.DURATION_MEDIUM, easing = Motion.EmphasizedEasing)) +
-                            slideInVertically(tween(Motion.DURATION_MEDIUM, easing = Motion.EmphasizedEasing)) { it / 8 }
+    MaterialTheme(
+        colorScheme = if (neuRemote) remoteHubDarkColorScheme() else MaterialTheme.colorScheme,
+    ) {
+        Scaffold(
+            containerColor = if (neuRemote) Neu.Background else MaterialTheme.colorScheme.background,
+            topBar = {
+                TopAppBar(
+                    title = { Text("RemoteHub") },
+                    colors = if (neuRemote) {
+                        TopAppBarDefaults.topAppBarColors(
+                            containerColor = Neu.Background,
+                            titleContentColor = Neu.Content,
+                            navigationIconContentColor = Neu.Content,
+                            actionIconContentColor = Neu.Content,
                         )
-                        .togetherWith(fadeOut(tween(Motion.DURATION_SHORT)))
-                },
-                label = "remoteScreenPhase",
-            ) { targetPhase ->
-                when (targetPhase) {
-                    ScreenPhase.CONNECTED -> ConnectedContent(
-                        state = state,
-                        onKey = hapticKey,
-                        onText = onText,
-                        climateActions = climateActions,
+                    } else {
+                        TopAppBarDefaults.topAppBarColors()
+                    },
+                    navigationIcon = {
+                        // The one always-visible way back to the landing page from the remote.
+                        if (phase != ScreenPhase.BROWSING) {
+                            IconButton(onClick = onDisconnect) {
+                                Icon(Icons.Filled.ArrowBack, contentDescription = "Back to devices")
+                            }
+                        }
+                    },
+                )
+            },
+        ) { padding ->
+            Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+                AnimatedContent(
+                    targetState = phase,
+                    transitionSpec = {
+                        (
+                            fadeIn(tween(Motion.DURATION_MEDIUM, easing = Motion.EmphasizedEasing)) +
+                                slideInVertically(tween(Motion.DURATION_MEDIUM, easing = Motion.EmphasizedEasing)) { it / 8 }
+                            )
+                            .togetherWith(fadeOut(tween(Motion.DURATION_SHORT)))
+                    },
+                    label = "remoteScreenPhase",
+                ) { targetPhase ->
+                    when (targetPhase) {
+                        ScreenPhase.CONNECTED -> ConnectedContent(
+                            state = state,
+                            onKey = hapticKey,
+                            onText = onText,
+                            climateActions = climateActions,
+                        )
+                        ScreenPhase.CONNECTING -> Connecting(
+                        name = state.connectingDevice?.name.orEmpty(),
+                        onCancel = onDisconnect,
                     )
-                    ScreenPhase.CONNECTING -> Connecting(state.connectingDevice?.name.orEmpty())
-                    ScreenPhase.BROWSING -> DeviceBrowser(
-                        state = state,
-                        irDrivers = irDrivers,
-                        onConnect = onConnect,
-                        onConnectDriver = onConnectDriver,
-                        onScan = onScan,
-                        onAddManual = { showManualAdd = true },
-                        onForget = onForget,
-                        onFavorite = onFavorite,
+                    ScreenPhase.FAILED -> ConnectionFailed(
+                        failure = state.failure,
+                        onReconnect = onConnect,
+                        onHome = onDisconnect,
                     )
+                        ScreenPhase.BROWSING -> DeviceBrowser(
+                            state = state,
+                            irDrivers = irDrivers,
+                            onConnect = onConnect,
+                            onConnectDriver = onConnectDriver,
+                            onScan = onScan,
+                            onAddManual = { showManualAdd = true },
+                            onForget = onForget,
+                            onFavorite = onFavorite,
+                        )
+                    }
                 }
             }
         }
@@ -234,15 +265,17 @@ private fun ConnectedContent(
     onText: (String) -> Unit,
     climateActions: ClimateActions,
 ) {
+    // The remote is designed to fit without scrolling; the scroll modifier stays purely as a
+    // safety net for very short screens and the taller climate layout.
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = Spacing.md),
-        verticalArrangement = Arrangement.spacedBy(Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
         state.connectedDevice?.let { device ->
-            HeroDeviceHeader(device = device, modifier = Modifier.padding(top = Spacing.sm))
+            HeroDeviceHeader(device = device, modifier = Modifier.padding(top = Spacing.xs))
         }
         RemoteControlPad(
             capabilities = state.capabilities,
@@ -251,13 +284,13 @@ private fun ConnectedContent(
             climate = state.climate,
             temperatureRangeC = state.temperatureRangeC,
             climateActions = climateActions,
-            modifier = Modifier.padding(bottom = Spacing.lg),
+            modifier = Modifier.padding(bottom = Spacing.md),
         )
     }
 }
 
 @Composable
-private fun Connecting(name: String) {
+private fun Connecting(name: String, onCancel: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -269,5 +302,56 @@ private fun Connecting(name: String) {
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(top = Spacing.md),
         )
+        TextButton(onClick = onCancel, modifier = Modifier.padding(top = Spacing.sm)) {
+            Text("Cancel")
+        }
+    }
+}
+
+/**
+ * Full-screen connection failure: says what went wrong and offers the two ways forward —
+ * try the same device again (Wake-on-LAN + the full retry ladder) or go back to the landing page.
+ */
+@Composable
+private fun ConnectionFailed(
+    failure: ConnectionState.Failed?,
+    onReconnect: (RemoteDevice) -> Unit,
+    onHome: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = Spacing.xl),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(
+            Icons.Filled.WifiOff,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(bottom = Spacing.md),
+        )
+        Text(
+            failure?.device?.name?.let { "Couldn't connect to $it" } ?: "Couldn't connect",
+            style = MaterialTheme.typography.titleLarge,
+        )
+        Text(
+            failure?.reason.orEmpty(),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = Spacing.sm),
+        )
+        failure?.device?.let { device ->
+            Button(
+                onClick = { onReconnect(device) },
+                modifier = Modifier.padding(top = Spacing.lg),
+            ) {
+                Icon(Icons.Filled.Refresh, contentDescription = null)
+                Text("Reconnect", modifier = Modifier.padding(start = Spacing.xs))
+            }
+        }
+        OutlinedButton(onClick = onHome, modifier = Modifier.padding(top = Spacing.sm)) {
+            Icon(Icons.Filled.Home, contentDescription = null)
+            Text("Home", modifier = Modifier.padding(start = Spacing.xs))
+        }
     }
 }

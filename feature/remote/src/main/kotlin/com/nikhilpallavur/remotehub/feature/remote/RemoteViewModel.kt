@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -61,6 +62,21 @@ class RemoteViewModel @Inject constructor(
 
     init {
         startScan()
+        autoConnectLastDevice()
+    }
+
+    /**
+     * Lands a returning user straight on the remote: the most recently used saved device connects
+     * automatically at launch. Guarded on Idle so it never stomps a connect the user started first.
+     */
+    private fun autoConnectLastDevice() {
+        viewModelScope.launch {
+            val last = store.devices.first()
+                .filter { it.paired && it.lastConnectedEpochMs > 0L }
+                .maxByOrNull { it.lastConnectedEpochMs }
+                ?: return@launch
+            if (manager.state.value is ConnectionState.Idle) connect(last)
+        }
     }
 
     fun startScan() {
@@ -81,6 +97,8 @@ class RemoteViewModel @Inject constructor(
 
     fun connect(device: RemoteDevice) {
         climate.value = ClimateSettings()
+        // Best-effort wake first: a standby TV won't answer the connect, but it will hear WoL.
+        device.macAddress?.let(manager::wakeOnLan)
         manager.connect(device)
     }
 

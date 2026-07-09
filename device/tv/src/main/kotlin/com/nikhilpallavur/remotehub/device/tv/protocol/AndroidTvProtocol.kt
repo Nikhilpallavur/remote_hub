@@ -97,7 +97,9 @@ object AndroidTvProtocol {
         RemoteKey.NUM_7 -> 14
         RemoteKey.NUM_8 -> 15
         RemoteKey.NUM_9 -> 16
-        RemoteKey.NETFLIX, RemoteKey.YOUTUBE, RemoteKey.PRIME_VIDEO -> null
+        RemoteKey.NETFLIX, RemoteKey.YOUTUBE, RemoteKey.PRIME_VIDEO,
+        RemoteKey.DISNEY_PLUS, RemoteKey.HOTSTAR, RemoteKey.SPOTIFY, RemoteKey.APPLE_TV,
+        -> null
     }
 
     /**
@@ -118,6 +120,10 @@ object AndroidTvProtocol {
         RemoteKey.YOUTUBE -> "https://www.youtube.com"
         RemoteKey.NETFLIX -> "https://www.netflix.com/title"
         RemoteKey.PRIME_VIDEO -> "https://app.primevideo.com"
+        RemoteKey.DISNEY_PLUS -> "https://www.disneyplus.com"
+        RemoteKey.HOTSTAR -> "https://www.hotstar.com"
+        RemoteKey.SPOTIFY -> "https://open.spotify.com"
+        RemoteKey.APPLE_TV -> "https://tv.apple.com"
         else -> null
     }
 

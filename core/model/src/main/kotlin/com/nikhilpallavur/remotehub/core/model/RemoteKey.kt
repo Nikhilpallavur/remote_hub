@@ -49,4 +49,8 @@ enum class RemoteKey {
     NETFLIX,
     YOUTUBE,
     PRIME_VIDEO,
+    DISNEY_PLUS,
+    HOTSTAR,
+    SPOTIFY,
+    APPLE_TV,
 }

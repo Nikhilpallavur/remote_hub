@@ -16,16 +16,33 @@ object NecEncoder {
     private const val BYTE_BITS = 8
 
     /** A best-effort default NEC command byte for [key] (address 0x00). */
+    @Suppress("CyclomaticComplexMethod")
     fun commandFor(key: RemoteKey): Int? = when (key) {
         RemoteKey.POWER -> 0x45
         RemoteKey.MENU -> 0x47
+        RemoteKey.HOME -> 0x46
+        RemoteKey.INPUT_SOURCE -> 0x0B
         RemoteKey.VOLUME_UP -> 0x15
         RemoteKey.VOLUME_DOWN -> 0x07
         RemoteKey.CHANNEL_UP -> 0x09
         RemoteKey.CHANNEL_DOWN -> 0x1C
         RemoteKey.MUTE -> 0x0D
+        RemoteKey.DPAD_UP -> 0x40
+        RemoteKey.DPAD_DOWN -> 0x19
+        RemoteKey.DPAD_LEFT -> 0x44
+        RemoteKey.DPAD_RIGHT -> 0x43
         RemoteKey.DPAD_CENTER -> 0x18
         RemoteKey.BACK -> 0x08
+        RemoteKey.NUM_0 -> 0x16
+        RemoteKey.NUM_1 -> 0x0C
+        RemoteKey.NUM_2 -> 0x5E
+        RemoteKey.NUM_3 -> 0x5A
+        RemoteKey.NUM_4 -> 0x42
+        RemoteKey.NUM_5 -> 0x52
+        RemoteKey.NUM_6 -> 0x4A
+        RemoteKey.NUM_7 -> 0x4E
+        RemoteKey.NUM_8 -> 0x50
+        RemoteKey.NUM_9 -> 0x54
         else -> null
     }
 
