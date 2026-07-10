@@ -34,6 +34,7 @@ class AndroidTvDriver @Inject constructor(
             DeviceCapability.DPAD,
             DeviceCapability.TOUCHPAD,
             DeviceCapability.VOLUME,
+            DeviceCapability.CHANNEL,
             DeviceCapability.MEDIA,
             DeviceCapability.NUMBER_PAD,
             DeviceCapability.TEXT_INPUT,

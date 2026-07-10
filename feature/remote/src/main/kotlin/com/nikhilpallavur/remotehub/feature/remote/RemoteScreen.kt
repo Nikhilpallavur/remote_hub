@@ -1,5 +1,6 @@
 package com.nikhilpallavur.remotehub.feature.remote
 
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -37,8 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -122,30 +122,33 @@ fun RemoteScreen(
     }
 
     // Every remote keypress gets a tactile tick; the visual press-scale lives on the buttons.
-    val haptics = LocalHapticFeedback.current
+    // VIRTUAL_KEY is the platform's soft-key click — clearly felt yet smooth — and it respects
+    // the system touch-feedback setting.
+    val view = LocalView.current
+    val tick: () -> Unit = { view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY) }
     val hapticKey: (RemoteKey) -> Unit = { key ->
-        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        tick()
         onKey(key)
     }
     val climateActions = ClimateActions(
         onTogglePower = {
-            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            tick()
             onToggleAcPower()
         },
         onSetTemperature = {
-            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            tick()
             onSetTemperature(it)
         },
         onSetMode = {
-            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            tick()
             onSetMode(it)
         },
         onSetFanSpeed = {
-            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            tick()
             onSetFanSpeed(it)
         },
         onSetSwing = {
-            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            tick()
             onSetSwing(it)
         },
     )
@@ -266,16 +269,18 @@ private fun ConnectedContent(
     climateActions: ClimateActions,
 ) {
     // The remote is designed to fit without scrolling; the scroll modifier stays purely as a
-    // safety net for very short screens and the taller climate layout.
+    // safety net for very short screens and the taller climate layout. Padding sits after the
+    // scroll (inside its clip) and covers all four sides so the neumorphic shadows (~14dp of
+    // blur + shift) are never cut at the edges.
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = Spacing.md),
+            .padding(horizontal = Spacing.md, vertical = Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
         state.connectedDevice?.let { device ->
-            HeroDeviceHeader(device = device, modifier = Modifier.padding(top = Spacing.xs))
+            HeroDeviceHeader(device = device)
         }
         RemoteControlPad(
             capabilities = state.capabilities,
@@ -284,7 +289,6 @@ private fun ConnectedContent(
             climate = state.climate,
             temperatureRangeC = state.temperatureRangeC,
             climateActions = climateActions,
-            modifier = Modifier.padding(bottom = Spacing.md),
         )
     }
 }

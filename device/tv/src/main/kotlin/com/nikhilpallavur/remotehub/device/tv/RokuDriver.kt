@@ -30,6 +30,7 @@ class RokuDriver @Inject constructor(
             DeviceCapability.DPAD,
             DeviceCapability.TOUCHPAD,
             DeviceCapability.VOLUME,
+            DeviceCapability.CHANNEL,
             DeviceCapability.MEDIA,
             DeviceCapability.TEXT_INPUT,
             DeviceCapability.APP_SHORTCUTS,

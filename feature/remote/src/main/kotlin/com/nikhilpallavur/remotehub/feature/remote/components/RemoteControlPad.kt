@@ -1,5 +1,11 @@
 package com.nikhilpallavur.remotehub.feature.remote.components
 
+import android.app.Activity
+import android.content.Intent
+import android.speech.RecognizerIntent
+import android.view.HapticFeedbackConstants
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -20,7 +26,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -36,11 +41,11 @@ import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.TouchApp
@@ -68,6 +73,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -198,7 +204,16 @@ private fun UtilityRow(
 
 @Composable
 private fun UtilityButton(icon: ImageVector, label: String, onClick: () -> Unit) {
-    NeuButton(onClick = onClick, label = label, modifier = Modifier.size(46.dp)) {
+    // Sheet launchers don't go through the haptic onKey wrapper, so they tick on their own.
+    val view = LocalView.current
+    NeuButton(
+        onClick = {
+            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            onClick()
+        },
+        label = label,
+        modifier = Modifier.size(46.dp),
+    ) {
         Icon(icon, contentDescription = label, tint = Neu.ContentDim, modifier = Modifier.size(21.dp))
     }
 }
@@ -451,7 +466,7 @@ private fun RemoteSheetHost(
         ) {
             when (sheet) {
                 RemoteSheet.TOUCHPAD -> TouchpadSurface(onKey)
-                RemoteSheet.KEYBOARD -> KeyboardInput(onText)
+                RemoteSheet.KEYBOARD -> KeyboardInput(onKey, onText)
                 RemoteSheet.NUMBER_PAD -> NumberPadGrid(onKey)
             }
         }
@@ -538,13 +553,34 @@ private fun TouchpadSurface(onKey: (RemoteKey) -> Unit) {
     )
 }
 
+/**
+ * Live wireless keyboard: the field mirrors straight onto the TV as the user types. Every edit is
+ * diffed against what the TV already has — removed characters go out as [RemoteKey.BACKSPACE]
+ * presses, added ones as literal text — so editing and a second round of typing behave exactly
+ * like typing on the TV itself (the old send-once model left stale text on the TV). The mic
+ * button dictates through the system speech recognizer and pushes the result through the same
+ * diff, so it also lands on the TV instantly.
+ */
 @Composable
-private fun KeyboardInput(onText: (String) -> Unit) {
+private fun KeyboardInput(onKey: (RemoteKey) -> Unit, onText: (String) -> Unit) {
     var text by remember { mutableStateOf("") }
-    val send = {
-        if (text.isNotEmpty()) {
-            onText(text)
-            text = ""
+    // What the TV has received so far this session; the sheet starts fresh on every open.
+    var synced by remember { mutableStateOf("") }
+    val sync: (String) -> Unit = { value ->
+        val prefix = synced.commonPrefixWith(value)
+        repeat(synced.length - prefix.length) { onKey(RemoteKey.BACKSPACE) }
+        if (value.length > prefix.length) onText(value.substring(prefix.length))
+        synced = value
+        text = value
+    }
+    val speechLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+                ?.let(sync)
         }
     }
     Text("Wireless keyboard", style = MaterialTheme.typography.titleMedium, color = Neu.Content)
@@ -552,25 +588,42 @@ private fun KeyboardInput(onText: (String) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
             value = text,
-            onValueChange = { text = it },
+            onValueChange = sync,
             modifier = Modifier.weight(1f),
             singleLine = true,
-            placeholder = { Text("Type here — sent to the TV") },
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(onSend = { send() }),
+            placeholder = { Text("Type here — it appears on the TV") },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             trailingIcon = {
                 if (text.isNotEmpty()) {
-                    IconButton(onClick = { text = "" }) {
-                        Icon(Icons.Filled.Clear, contentDescription = "Clear")
+                    IconButton(onClick = { sync("") }) {
+                        Icon(Icons.Filled.Clear, contentDescription = "Clear text on the TV too")
                     }
                 }
             },
         )
         Spacer(Modifier.width(Spacing.sm))
-        FilledTonalIconButton(onClick = send, modifier = Modifier.size(56.dp)) {
-            Icon(Icons.Filled.Send, contentDescription = "Send text")
+        FilledTonalIconButton(
+            onClick = {
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                    .putExtra(
+                        RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
+                    )
+                    .putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to type on the TV")
+                // Devices without a speech recognizer just no-op instead of crashing.
+                runCatching { speechLauncher.launch(intent) }
+            },
+            modifier = Modifier.size(56.dp),
+        ) {
+            Icon(Icons.Filled.Mic, contentDescription = "Voice input")
         }
     }
+    Spacer(Modifier.height(Spacing.xs))
+    Text(
+        "Every change is sent to the TV instantly",
+        style = MaterialTheme.typography.labelMedium,
+        color = Neu.ContentDim,
+    )
 }
 
 @Composable

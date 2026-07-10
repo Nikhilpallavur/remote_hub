@@ -79,6 +79,7 @@ object AndroidTvProtocol {
         RemoteKey.MUTE -> 164
         RemoteKey.CHANNEL_UP -> 166
         RemoteKey.CHANNEL_DOWN -> 167
+        RemoteKey.BACKSPACE -> 67
         RemoteKey.PLAY_PAUSE -> 85
         RemoteKey.PLAY -> 126
         RemoteKey.PAUSE -> 127

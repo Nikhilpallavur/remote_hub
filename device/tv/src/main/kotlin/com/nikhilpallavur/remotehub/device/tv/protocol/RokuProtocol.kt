@@ -31,6 +31,7 @@ object RokuProtocol {
         RemoteKey.MUTE -> "VolumeMute"
         RemoteKey.CHANNEL_UP -> "ChannelUp"
         RemoteKey.CHANNEL_DOWN -> "ChannelDown"
+        RemoteKey.BACKSPACE -> "Backspace"
         RemoteKey.PLAY_PAUSE, RemoteKey.PLAY, RemoteKey.PAUSE -> "Play"
         RemoteKey.REWIND -> "Rev"
         RemoteKey.FAST_FORWARD -> "Fwd"

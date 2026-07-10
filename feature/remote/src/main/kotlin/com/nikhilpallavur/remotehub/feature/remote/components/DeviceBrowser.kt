@@ -30,9 +30,15 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -55,11 +61,14 @@ private val TV_CATEGORIES = setOf(
     DeviceCategory.PROJECTOR,
 )
 
+/** The two landing-page tabs — network remotes vs. blaster remotes. */
+private enum class BrowserTab(val label: String) { WIFI("Wi-Fi"), INFRARED("Infrared") }
+
 /**
- * The pre-connection experience, ordered by what the user reaches for most: saved devices
- * (favorites, then TVs) up top, the infrared TV remote next so the TV is controllable even with
- * no Wi-Fi, then live discovery, and finally the second-priority remotes (AC and friends) and
- * the manual add-by-IP escape hatch. Tapping any row connects.
+ * The pre-connection experience, split by how a remote reaches the device: the Wi-Fi tab holds
+ * saved network devices, live discovery and the add-by-IP escape hatch, while the Infrared tab
+ * holds the blaster-driven remotes (TV first, then AC and friends) that need no network at all.
+ * Tapping any row connects.
  */
 @Composable
 fun DeviceBrowser(
@@ -81,19 +90,135 @@ fun DeviceBrowser(
                 .thenByDescending { it.lastConnectedEpochMs },
         )
     }
+    val savedWifi = remember(savedSorted) { savedSorted.filter { it.transport != Transport.INFRARED } }
+    val savedIr = remember(savedSorted) { savedSorted.filter { it.transport == Transport.INFRARED } }
     val tvIrDrivers = remember(irDrivers) { irDrivers.filter { it.category in TV_CATEGORIES } }
     val otherIrDrivers = remember(irDrivers) { irDrivers.filterNot { it.category in TV_CATEGORIES } }
 
+    var tab by rememberSaveable { mutableStateOf(BrowserTab.WIFI) }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        TabRow(selectedTabIndex = tab.ordinal) {
+            BrowserTab.entries.forEach { candidate ->
+                Tab(
+                    selected = tab == candidate,
+                    onClick = { tab = candidate },
+                    text = { Text(candidate.label) },
+                    icon = {
+                        Icon(
+                            when (candidate) {
+                                BrowserTab.WIFI -> Icons.Filled.Wifi
+                                BrowserTab.INFRARED -> Icons.Filled.SettingsRemote
+                            },
+                            contentDescription = null,
+                        )
+                    },
+                )
+            }
+        }
+        AnimatedContent(targetState = tab, label = "browserTab") { activeTab ->
+            when (activeTab) {
+                BrowserTab.WIFI -> WifiTab(
+                    state = state,
+                    saved = savedWifi,
+                    onConnect = onConnect,
+                    onScan = onScan,
+                    onAddManual = onAddManual,
+                    onFavorite = onFavorite,
+                    contentPadding = contentPadding,
+                )
+                BrowserTab.INFRARED -> InfraredTab(
+                    saved = savedIr,
+                    tvIrDrivers = tvIrDrivers,
+                    otherIrDrivers = otherIrDrivers,
+                    onConnect = onConnect,
+                    onConnectDriver = onConnectDriver,
+                    onFavorite = onFavorite,
+                    contentPadding = contentPadding,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WifiTab(
+    state: RemoteUiState,
+    saved: List<RemoteDevice>,
+    onConnect: (RemoteDevice) -> Unit,
+    onScan: () -> Unit,
+    onAddManual: () -> Unit,
+    onFavorite: (RemoteDevice) -> Unit,
+    contentPadding: PaddingValues,
+) {
     LazyColumn(
-        modifier = modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
         item { ScanHeader(isScanning = state.isScanning, onScan = onScan) }
 
-        if (savedSorted.isNotEmpty()) {
+        if (saved.isNotEmpty()) {
             item { SectionHeader("Saved devices") }
-            items(savedSorted, key = { it.id }) { device ->
+            items(saved, key = { it.id }) { device ->
+                DeviceRow(
+                    device = device,
+                    saved = true,
+                    onConnect = { onConnect(device) },
+                    onFavorite = { onFavorite(device) },
+                    modifier = Modifier.animateItem(),
+                )
+            }
+        }
+
+        item { SectionHeader(if (state.isScanning) "Searching nearby…" else "Found nearby") }
+        if (state.newlyDiscovered.isEmpty()) {
+            item { EmptyDiscovery(isScanning = state.isScanning) }
+        } else {
+            items(state.newlyDiscovered, key = { it.id }) { device ->
+                DeviceRow(
+                    device = device,
+                    saved = false,
+                    onConnect = { onConnect(device) },
+                    onFavorite = {},
+                    modifier = Modifier.animateItem(),
+                )
+            }
+        }
+
+        item {
+            OutlinedButton(
+                onClick = onAddManual,
+                modifier = Modifier.fillMaxWidth().padding(top = Spacing.sm),
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = null)
+                Spacer(Modifier.size(Spacing.xs))
+                Text("Add a device by IP address")
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfraredTab(
+    saved: List<RemoteDevice>,
+    tvIrDrivers: List<DriverDescriptor>,
+    otherIrDrivers: List<DriverDescriptor>,
+    onConnect: (RemoteDevice) -> Unit,
+    onConnectDriver: (String) -> Unit,
+    onFavorite: (RemoteDevice) -> Unit,
+    contentPadding: PaddingValues,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = contentPadding,
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        item { InfraredHeader() }
+
+        if (saved.isNotEmpty()) {
+            item { SectionHeader("Saved remotes") }
+            items(saved, key = { it.id }) { device ->
                 DeviceRow(
                     device = device,
                     saved = true,
@@ -115,21 +240,6 @@ fun DeviceBrowser(
             }
         }
 
-        item { SectionHeader(if (state.isScanning) "Searching nearby…" else "Found nearby") }
-        if (state.newlyDiscovered.isEmpty()) {
-            item { EmptyDiscovery(isScanning = state.isScanning) }
-        } else {
-            items(state.newlyDiscovered, key = { it.id }) { device ->
-                DeviceRow(
-                    device = device,
-                    saved = false,
-                    onConnect = { onConnect(device) },
-                    onFavorite = {},
-                    modifier = Modifier.animateItem(),
-                )
-            }
-        }
-
         if (otherIrDrivers.isNotEmpty()) {
             item { SectionHeader("Other remotes") }
             items(otherIrDrivers, key = { it.id }) { driver ->
@@ -140,17 +250,22 @@ fun DeviceBrowser(
                 )
             }
         }
+    }
+}
 
-        item {
-            OutlinedButton(
-                onClick = onAddManual,
-                modifier = Modifier.fillMaxWidth().padding(top = Spacing.sm),
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = null)
-                Spacer(Modifier.size(Spacing.xs))
-                Text("Add a device by IP address")
-            }
-        }
+@Composable
+private fun InfraredHeader() {
+    Column(Modifier.fillMaxWidth().padding(vertical = Spacing.xs)) {
+        Text(
+            "Infrared remotes",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            "Driven by this phone's IR blaster — no network needed",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
