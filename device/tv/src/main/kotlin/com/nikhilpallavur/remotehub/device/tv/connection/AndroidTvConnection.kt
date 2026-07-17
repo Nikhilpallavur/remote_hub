@@ -182,9 +182,11 @@ class AndroidTvConnection(
         message: RemoteServerMessage,
     ): Boolean {
         when (message) {
+            // deviceName (not a shared constant) as the model: it carries the per-install id, so
+            // the TV's connected-remotes bookkeeping can tell multiple phones apart.
             RemoteServerMessage.Configure -> writeLocked(
                 out,
-                AndroidTvProtocol.configureResponse(DEVICE_MODEL, VENDOR, PACKAGE_NAME, APP_VERSION),
+                AndroidTvProtocol.configureResponse(deviceName, VENDOR, PACKAGE_NAME, APP_VERSION),
             )
             RemoteServerMessage.SetActive -> writeLocked(out, AndroidTvProtocol.setActive())
             RemoteServerMessage.Start -> mutableState.value = ConnectionState.Connected(device)
@@ -309,7 +311,6 @@ class AndroidTvConnection(
         const val PAIRING_TIMEOUT_MS = 15000
         val RETRY_BACKOFF_MS = listOf(500L, 1000L, 2000L, 0L)
         const val SERVICE_NAME = "RemoteHub"
-        const val DEVICE_MODEL = "RemoteHub"
         const val VENDOR = "RemoteHub"
         const val PACKAGE_NAME = "com.nikhilpallavur.remotehub"
         const val APP_VERSION = "1.0"

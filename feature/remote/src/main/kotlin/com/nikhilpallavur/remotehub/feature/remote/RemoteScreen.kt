@@ -1,6 +1,5 @@
 package com.nikhilpallavur.remotehub.feature.remote
 
-import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -38,11 +37,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nikhilpallavur.remotehub.core.designsystem.motion.Motion
+import com.nikhilpallavur.remotehub.core.designsystem.motion.rememberHaptics
 import com.nikhilpallavur.remotehub.core.designsystem.theme.Spacing
 import com.nikhilpallavur.remotehub.core.designsystem.theme.remoteHubDarkColorScheme
 import com.nikhilpallavur.remotehub.core.drivers.DriverDescriptor
@@ -122,10 +121,9 @@ fun RemoteScreen(
     }
 
     // Every remote keypress gets a tactile tick; the visual press-scale lives on the buttons.
-    // VIRTUAL_KEY is the platform's soft-key click — clearly felt yet smooth — and it respects
-    // the system touch-feedback setting.
-    val view = LocalView.current
-    val tick: () -> Unit = { view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY) }
+    // Driven straight off the Vibrator (see rememberHaptics) rather than View.performHapticFeedback,
+    // so it's felt even on skins (MIUI) that ship with the touch-feedback setting turned off.
+    val tick: () -> Unit = rememberHaptics()
     val hapticKey: (RemoteKey) -> Unit = { key ->
         tick()
         onKey(key)
@@ -276,11 +274,16 @@ private fun ConnectedContent(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = Spacing.md, vertical = Spacing.md),
+            .padding(vertical = Spacing.lg),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
         state.connectedDevice?.let { device ->
-            HeroDeviceHeader(device = device)
+            // Match the parent's neu-face rule: the TV remote is the fixed dark neumorphic skin,
+            // the climate remote stays on the themed Material scheme.
+            HeroDeviceHeader(
+                device = device,
+                neumorphic = DeviceCapability.TEMPERATURE !in state.capabilities,
+            )
         }
         RemoteControlPad(
             capabilities = state.capabilities,

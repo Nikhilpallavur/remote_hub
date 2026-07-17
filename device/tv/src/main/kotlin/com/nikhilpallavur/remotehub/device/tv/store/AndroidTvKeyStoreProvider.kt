@@ -27,6 +27,9 @@ class AndroidTvKeyStoreProvider @Inject constructor(
 
     fun clientCertificate(): X509Certificate = AndroidTvCrypto.clientCertificate(keyStore)
 
+    /** Short per-install id (public-key fingerprint) so each phone is distinct to the TV. */
+    fun clientId(): String = AndroidTvCrypto.clientId(clientCertificate())
+
     @Synchronized
     private fun loadOrCreate(): KeyStore {
         if (file.exists()) {

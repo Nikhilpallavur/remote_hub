@@ -29,6 +29,7 @@ enum class RemoteKey {
     CHANNEL_UP,
     CHANNEL_DOWN,
     BACKSPACE,
+    ENTER,
     PLAY_PAUSE,
     PLAY,
     PAUSE,

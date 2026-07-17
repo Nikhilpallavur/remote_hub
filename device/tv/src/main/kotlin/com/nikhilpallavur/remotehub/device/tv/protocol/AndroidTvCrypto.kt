@@ -35,6 +35,7 @@ import javax.net.ssl.X509TrustManager
 object AndroidTvCrypto {
     private const val KEY_SIZE = 2048
     private const val CERT_VALIDITY_MS = 25L * 365 * 24 * 60 * 60 * 1000
+    private const val CLIENT_ID_BYTES = 4
     const val CLIENT_ALIAS = "omnicore-remote"
 
     /**
@@ -76,7 +77,13 @@ object AndroidTvCrypto {
 
     // ---------------- certificate + TLS plumbing (runtime, Android/BouncyCastle) ----------------
 
-    /** Generates a fresh RSA key pair plus a long-lived self-signed certificate around it. */
+    /**
+     * Generates a fresh RSA key pair plus a long-lived self-signed certificate around it. The CN
+     * carries a random per-install suffix so every phone presents a distinct identity to the TV —
+     * with a shared constant name, several phones in one household are indistinguishable in the
+     * TV's paired-remotes bookkeeping and can evict each other's session. Existing keystores are
+     * never regenerated, so already-paired installs keep their old CN and stay paired.
+     */
     fun newClientKeyStore(password: CharArray): KeyStore {
         val generator = KeyPairGenerator.getInstance("RSA")
         generator.initialize(KEY_SIZE)
@@ -84,7 +91,7 @@ object AndroidTvCrypto {
 
         val now = Date()
         val notAfter = Date(now.time + CERT_VALIDITY_MS)
-        val subject = X500Name("CN=OmniCore Remote")
+        val subject = X500Name("CN=RemoteHub-${randomSuffix()}")
         val serial = BigInteger.valueOf(now.time)
         val builder = JcaX509v3CertificateBuilder(subject, serial, now, notAfter, subject, keyPair.public)
         val signer = JcaContentSignerBuilder("SHA256withRSA").build(keyPair.private)
@@ -105,6 +112,23 @@ object AndroidTvCrypto {
 
     fun clientCertificate(keyStore: KeyStore): X509Certificate =
         keyStore.getCertificate(CLIENT_ALIAS) as X509Certificate
+
+    /**
+     * Short stable fingerprint of [certificate]'s public key — the per-install id woven into the
+     * names the TV sees (pairing dialog, connected-remotes list). Derived, not stored, so it works
+     * for pre-existing keystores minted before CNs carried a suffix.
+     */
+    fun clientId(certificate: X509Certificate): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(certificate.publicKey.encoded)
+            .take(CLIENT_ID_BYTES)
+            .joinToString("") { byte -> Integer.toHexString(byte.toInt() and 0xFF).padStart(2, '0') }
+
+    private fun randomSuffix(): String {
+        val bytes = ByteArray(CLIENT_ID_BYTES)
+        SecureRandom().nextBytes(bytes)
+        return bytes.joinToString("") { byte -> Integer.toHexString(byte.toInt() and 0xFF).padStart(2, '0') }
+    }
 
     /** TLS context that presents our client cert and trusts any server cert (LAN + pairing pin). */
     fun sslContext(keyStore: KeyStore, password: CharArray): SSLContext {

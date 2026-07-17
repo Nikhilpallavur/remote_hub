@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,6 +45,16 @@ class RemoteConnectionManager @Inject constructor(
     private var active: RemoteConnection? = null
     private var mirrorJob: Job? = null
 
+    // Commands flow through one queue drained by one worker, so they reach the socket in exactly
+    // the order the UI issued them. Launching a coroutine per send let a burst of keyboard-mirror
+    // edits race each other onto the IO dispatcher — BACKSPACEs could land after the replacement
+    // text, corrupting what the TV shows (and over-deleting acts as BACK on most TVs).
+    private val outbound = Channel<RemoteCommand>(Channel.UNLIMITED)
+
+    init {
+        scope.launch { for (command in outbound) active?.send(command) }
+    }
+
     fun connect(device: RemoteDevice) {
         disconnect()
         val driver = registry.byId(device.driverId)
@@ -69,7 +80,7 @@ class RemoteConnectionManager @Inject constructor(
     }
 
     fun send(command: RemoteCommand) {
-        scope.launch { active?.send(command) }
+        outbound.trySend(command)
     }
 
     fun activeSupports(command: RemoteCommand): Boolean = active?.supports(command) ?: false
@@ -79,6 +90,9 @@ class RemoteConnectionManager @Inject constructor(
         mirrorJob = null
         active?.close()
         active = null
+        // Whatever is still queued was meant for the connection that just died; draining it keeps
+        // stale presses from firing at the next device the user connects.
+        while (outbound.tryReceive().isSuccess) Unit
         mutableState.value = ConnectionState.Idle
     }
 

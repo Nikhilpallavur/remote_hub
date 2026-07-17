@@ -51,6 +51,8 @@ class AndroidTvDriver @Inject constructor(
         descriptor = descriptor,
         sslContext = keyStoreProvider.sslContext(),
         clientCert = keyStoreProvider.clientCertificate(),
-        deviceName = "RemoteHub (${Build.MODEL})",
+        // The per-install id keeps several phones (even identical models) distinct on the TV's
+        // pairing dialog and paired-remotes list, so one household can pair many RemoteHubs.
+        deviceName = "RemoteHub ${Build.MODEL} #${keyStoreProvider.clientId()}",
     )
 }

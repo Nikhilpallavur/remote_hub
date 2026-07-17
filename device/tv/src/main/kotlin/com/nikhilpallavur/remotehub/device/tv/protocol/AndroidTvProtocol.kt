@@ -39,7 +39,13 @@ object AndroidTvProtocol {
     private const val REMOTE_PING_REQUEST = 8
     private const val REMOTE_PING_RESPONSE = 9
     private const val REMOTE_KEY_INJECT = 10
-    private const val REMOTE_START = 20
+
+    // The reference `remotemessage.proto` puts remote_start at field 40; field 20 is
+    // remote_ime_key_inject, which TVs push whenever a text field gains focus. Some TVs open the
+    // session with one, some with the other, so both are treated as the "session is live" signal
+    // (setting Connected twice is idempotent).
+    private const val REMOTE_IME_KEY_INJECT = 20
+    private const val REMOTE_START = 40
     private const val REMOTE_APP_LINK = 90
 
     private const val ACTIVE_MAGIC = 622L
@@ -80,6 +86,7 @@ object AndroidTvProtocol {
         RemoteKey.CHANNEL_UP -> 166
         RemoteKey.CHANNEL_DOWN -> 167
         RemoteKey.BACKSPACE -> 67
+        RemoteKey.ENTER -> 66
         RemoteKey.PLAY_PAUSE -> 85
         RemoteKey.PLAY -> 126
         RemoteKey.PAUSE -> 127
@@ -106,13 +113,33 @@ object AndroidTvProtocol {
     /**
      * The `KeyEvent` code that types a single character into a focused field, or null when the
      * character can't be sent as a plain key press. Letters are injected without a shift meta —
-     * Android TV search boxes treat the letter keys case-insensitively.
+     * Android TV search boxes treat the letter keys case-insensitively. Only characters that live
+     * on an unshifted key are mappable: `RemoteKeyInject` carries no meta state, so shifted
+     * symbols (!, ?, parentheses…) have no wire representation and must return null. Keep this in
+     * sync with the keyboard sheet's input filter, which blocks unmappable characters up front so
+     * the phone-side mirror never drifts from what the TV actually received.
      */
+    @Suppress("CyclomaticComplexMethod")
     fun charKeyCode(character: Char): Int? = when (character) {
         in 'a'..'z' -> KEYCODE_A + (character - 'a')
         in 'A'..'Z' -> KEYCODE_A + (character - 'A')
         in '0'..'9' -> KEYCODE_0 + (character - '0')
         ' ' -> KEYCODE_SPACE
+        '*' -> 17
+        '#' -> 18
+        ',' -> 55
+        '.' -> 56
+        '`' -> 68
+        '-' -> 69
+        '=' -> 70
+        '[' -> 71
+        ']' -> 72
+        '\\' -> 73
+        ';' -> 74
+        '\'' -> 75
+        '/' -> 76
+        '@' -> 77
+        '+' -> 81
         else -> null
     }
 
@@ -234,7 +261,7 @@ object AndroidTvProtocol {
     fun classifyRemote(message: ProtoMessage): RemoteServerMessage = when {
         message.has(REMOTE_CONFIGURE) -> RemoteServerMessage.Configure
         message.has(REMOTE_SET_ACTIVE) -> RemoteServerMessage.SetActive
-        message.has(REMOTE_START) -> RemoteServerMessage.Start
+        message.has(REMOTE_START) || message.has(REMOTE_IME_KEY_INJECT) -> RemoteServerMessage.Start
         message.has(REMOTE_PING_REQUEST) ->
             RemoteServerMessage.Ping(message.message(REMOTE_PING_REQUEST)?.varint(1) ?: 0)
         message.has(REMOTE_ERROR) -> RemoteServerMessage.Error

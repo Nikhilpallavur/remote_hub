@@ -48,13 +48,27 @@ class AndroidTvProtocolTest {
     @Test
     fun mapsSearchKeyAndTypesCharactersToKeyCodes() {
         assertThat(AndroidTvProtocol.keyCode(RemoteKey.SEARCH)).isEqualTo(84)
+        assertThat(AndroidTvProtocol.keyCode(RemoteKey.ENTER)).isEqualTo(66)
         assertThat(AndroidTvProtocol.charKeyCode('a')).isEqualTo(29)
         assertThat(AndroidTvProtocol.charKeyCode('z')).isEqualTo(54)
         assertThat(AndroidTvProtocol.charKeyCode('A')).isEqualTo(29)
         assertThat(AndroidTvProtocol.charKeyCode('0')).isEqualTo(7)
         assertThat(AndroidTvProtocol.charKeyCode('9')).isEqualTo(16)
         assertThat(AndroidTvProtocol.charKeyCode(' ')).isEqualTo(62)
+    }
+
+    @Test
+    fun typesUnshiftedPunctuationButNeverShiftedSymbols() {
+        assertThat(AndroidTvProtocol.charKeyCode(',')).isEqualTo(55)
+        assertThat(AndroidTvProtocol.charKeyCode('.')).isEqualTo(56)
+        assertThat(AndroidTvProtocol.charKeyCode('-')).isEqualTo(69)
+        assertThat(AndroidTvProtocol.charKeyCode('@')).isEqualTo(77)
+        assertThat(AndroidTvProtocol.charKeyCode('/')).isEqualTo(76)
+        assertThat(AndroidTvProtocol.charKeyCode('+')).isEqualTo(81)
+        // RemoteKeyInject has no meta state, so shifted symbols must stay unmappable.
         assertThat(AndroidTvProtocol.charKeyCode('!')).isNull()
+        assertThat(AndroidTvProtocol.charKeyCode('?')).isNull()
+        assertThat(AndroidTvProtocol.charKeyCode(':')).isNull()
     }
 
     @Test
@@ -75,8 +89,14 @@ class AndroidTvProtocolTest {
 
     @Test
     fun classifiesServerRemoteMessages() {
-        val start = ProtoWriter().message(20, ByteArray(0)).toByteArray()
+        // remote_start proper (field 40) and remote_ime_key_inject (field 20 — pushed when a TV
+        // text field focuses) both mean the session is live.
+        val start = ProtoWriter().message(40, ByteArray(0)).toByteArray()
         assertThat(AndroidTvProtocol.classifyRemote(ProtoBuf.parse(start)))
+            .isEqualTo(RemoteServerMessage.Start)
+
+        val imeStart = ProtoWriter().message(20, ByteArray(0)).toByteArray()
+        assertThat(AndroidTvProtocol.classifyRemote(ProtoBuf.parse(imeStart)))
             .isEqualTo(RemoteServerMessage.Start)
 
         val pingBody = ProtoWriter().varint(1, 5).toByteArray()

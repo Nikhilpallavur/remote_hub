@@ -3,12 +3,13 @@ package com.nikhilpallavur.remotehub.feature.remote.components
 import android.app.Activity
 import android.content.Intent
 import android.speech.RecognizerIntent
-import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -24,8 +25,10 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -46,6 +49,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.TouchApp
@@ -56,35 +60,46 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.nikhilpallavur.remotehub.core.designsystem.motion.Motion
+import com.nikhilpallavur.remotehub.core.designsystem.motion.rememberHaptics
+import com.nikhilpallavur.remotehub.core.designsystem.motion.rememberPressFeedback
 import com.nikhilpallavur.remotehub.core.designsystem.theme.Spacing
+import com.nikhilpallavur.remotehub.core.designsystem.theme.margin
 import com.nikhilpallavur.remotehub.core.model.DeviceCapability
 import com.nikhilpallavur.remotehub.core.model.RemoteKey
 import com.nikhilpallavur.remotehub.feature.remote.ClimateSettings
 import com.nikhilpallavur.remotehub.feature.remote.DEFAULT_TEMPERATURE_RANGE_C
 import kotlin.math.abs
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 
 /**
  * The dynamic remote. It renders one section per [capabilities] entry, so the layout is generated
@@ -107,9 +122,13 @@ fun RemoteControlPad(
     climateActions: ClimateActions? = null,
 ) {
     Column(
+        // animateContentSize clips to its own bounds (clipToBounds + size anim), so it must sit
+        // BEFORE the margin — otherwise the clip hugs the content and slices the ~14dp neumorphic
+        // shadows off every edge button. With it first, the margin's room lives inside the clip.
         modifier = modifier
             .fillMaxWidth()
-            .animateContentSize(tween(Motion.DURATION_MEDIUM, easing = Motion.EmphasizedEasing)),
+            .animateContentSize(tween(Motion.DURATION_MEDIUM, easing = Motion.EmphasizedEasing))
+            .margin(Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
         if (DeviceCapability.TEMPERATURE in capabilities && climateActions != null) {
@@ -205,10 +224,10 @@ private fun UtilityRow(
 @Composable
 private fun UtilityButton(icon: ImageVector, label: String, onClick: () -> Unit) {
     // Sheet launchers don't go through the haptic onKey wrapper, so they tick on their own.
-    val view = LocalView.current
+    val tick = rememberHaptics()
     NeuButton(
         onClick = {
-            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            tick()
             onClick()
         },
         label = label,
@@ -225,65 +244,103 @@ private fun NavRow(onKey: (RemoteKey) -> Unit) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        NavButton(Icons.Filled.ArrowBack, "Back") { onKey(RemoteKey.BACK) }
+        NavButton(Icons.Filled.Menu, "Menu") { onKey(RemoteKey.MENU) }
         NavButton(Icons.Filled.Home, "Home") { onKey(RemoteKey.HOME) }
         NavButton(Icons.Filled.Search, "Search") { onKey(RemoteKey.SEARCH) }
-        NavButton(Icons.Filled.Menu, "Menu") { onKey(RemoteKey.MENU) }
+        NavButton(Icons.Filled.ArrowBack, "Back", tint = Neu.Accent) { onKey(RemoteKey.BACK) }
     }
 }
 
 @Composable
-private fun NavButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+private fun NavButton(
+    icon: ImageVector,
+    label: String,
+    tint: Color = Neu.Content,
+    onClick: () -> Unit,
+) {
     NeuButton(onClick = onClick, label = label, modifier = Modifier.size(54.dp)) {
-        Icon(icon, contentDescription = label, tint = Neu.Content, modifier = Modifier.size(23.dp))
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(23.dp))
     }
 }
 
-/** The heart of the remote: slim VOL / CH rockers flanking the circular D-pad, one shared row. */
+/**
+ * The heart of the remote: the circular D-pad gets the full row to itself with the VOL / CH
+ * rockers on their own row beneath it. Flanking the pad with vertical rockers squeezed its
+ * diameter badly on narrow phones — the arrows became fiddly pin-pricks — so the pad now grows to
+ * the sheet width (capped at [DPAD_MAX_DIAMETER] so tablets don't get a comedy-sized disc).
+ */
 @Composable
 private fun ControlCluster(capabilities: Set<DeviceCapability>, onKey: (RemoteKey) -> Unit) {
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(Spacing.md),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        if (DeviceCapability.VOLUME in capabilities) {
-            RockerPill(
-                label = "VOL",
-                topIcon = Icons.Filled.Add,
-                bottomIcon = Icons.Filled.Remove,
-                onTop = { onKey(RemoteKey.VOLUME_UP) },
-                onBottom = { onKey(RemoteKey.VOLUME_DOWN) },
-                onMiddle = { onKey(RemoteKey.MUTE) },
-                middleIcon = Icons.Filled.VolumeOff,
+        if (DeviceCapability.DPAD in capabilities) {
+            DirectionPad(
+                onKey = onKey,
+                modifier = Modifier
+                    .widthIn(max = DPAD_MAX_DIAMETER)
+                    .fillMaxWidth(),
             )
         }
-        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-            if (DeviceCapability.DPAD in capabilities) DirectionPad(onKey)
-        }
-        if (DeviceCapability.CHANNEL in capabilities) {
-            RockerPill(
-                label = "CH",
-                topIcon = Icons.Filled.KeyboardArrowUp,
-                bottomIcon = Icons.Filled.KeyboardArrowDown,
-                onTop = { onKey(RemoteKey.CHANNEL_UP) },
-                onBottom = { onKey(RemoteKey.CHANNEL_DOWN) },
-                onMiddle = null,
-                middleIcon = null,
-            )
+        if (DeviceCapability.VOLUME in capabilities || DeviceCapability.CHANNEL in capabilities) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+            ) {
+                if (DeviceCapability.VOLUME in capabilities) {
+                    HorizontalRocker(
+                        label = "VOL",
+                        leadingIcon = Icons.Filled.Remove,
+                        trailingIcon = Icons.Filled.Add,
+                        onLeading = { onKey(RemoteKey.VOLUME_DOWN) },
+                        onTrailing = { onKey(RemoteKey.VOLUME_UP) },
+                        onMiddle = { onKey(RemoteKey.MUTE) },
+                        middleIcon = Icons.Filled.VolumeOff,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (DeviceCapability.CHANNEL in capabilities) {
+                    HorizontalRocker(
+                        label = "CH",
+                        leadingIcon = Icons.Filled.KeyboardArrowDown,
+                        trailingIcon = Icons.Filled.KeyboardArrowUp,
+                        onLeading = { onKey(RemoteKey.CHANNEL_DOWN) },
+                        onTrailing = { onKey(RemoteKey.CHANNEL_UP) },
+                        onMiddle = null,
+                        middleIcon = null,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun DirectionPad(onKey: (RemoteKey) -> Unit) {
+private fun DirectionPad(onKey: (RemoteKey) -> Unit, modifier: Modifier = Modifier) {
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .aspectRatio(1f)
             .neuRaised()
             .clip(CircleShape)
-            .background(neuSurfaceBrush()),
+            .background(neuSurfaceBrush())
+            // The arrows and OK consume their own taps; this catches everything else on the pad
+            // so the whole quadrant acts as the arrow, not just the small icon hit box.
+            .pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    val dx = offset.x - size.width / 2f
+                    val dy = offset.y - size.height / 2f
+                    onKey(
+                        if (abs(dx) >= abs(dy)) {
+                            if (dx > 0) RemoteKey.DPAD_RIGHT else RemoteKey.DPAD_LEFT
+                        } else {
+                            if (dy > 0) RemoteKey.DPAD_DOWN else RemoteKey.DPAD_UP
+                        },
+                    )
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
         DpadArrow(Icons.Filled.KeyboardArrowUp, "Up", Modifier.align(Alignment.TopCenter)) {
@@ -298,12 +355,21 @@ private fun DirectionPad(onKey: (RemoteKey) -> Unit) {
         DpadArrow(Icons.Filled.KeyboardArrowRight, "Right", Modifier.align(Alignment.CenterEnd)) {
             onKey(RemoteKey.DPAD_RIGHT)
         }
+        // A faint accent ring circles the OK, splitting the raised center from the arrow zone so
+        // the pad reads like a physical remote's directional ring rather than a plain disc.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.46f)
+                .aspectRatio(1f)
+                .border(1.5.dp, Neu.Accent.copy(alpha = 0.45f), CircleShape),
+        )
         NeuButton(
             onClick = { onKey(RemoteKey.DPAD_CENTER) },
             label = "OK",
-            modifier = Modifier.size(64.dp),
+            modifier = Modifier.size(72.dp),
+            background = neuAccentBrush(),
         ) {
-            Text("OK", color = Neu.Content, fontWeight = FontWeight.SemiBold)
+            Text("OK", color = Color.White, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -311,36 +377,75 @@ private fun DirectionPad(onKey: (RemoteKey) -> Unit) {
 @Composable
 private fun DpadArrow(icon: ImageVector, label: String, modifier: Modifier, onClick: () -> Unit) {
     // Arrows sit on the shared pad surface, so they're flat hit areas rather than raised buttons.
-    IconButton(onClick = onClick, modifier = modifier.size(56.dp)) {
-        Icon(icon, contentDescription = label, tint = Neu.Content, modifier = Modifier.size(30.dp))
+    // Generous 76dp targets so the ring is comfortably tappable, not a pin-prick around the glyph.
+    PressIconButton(onClick = onClick, modifier = modifier.size(76.dp)) {
+        Icon(icon, contentDescription = label, tint = Neu.Content, modifier = Modifier.size(34.dp))
     }
 }
 
+/**
+ * [IconButton] with the same press-scale spring as the raised [NeuButton]s, so the flat hit areas
+ * (D-pad arrows, rocker segments) answer a tap with the same motion as everything else.
+ */
 @Composable
-private fun RockerPill(
+private fun PressIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val press = rememberPressFeedback()
+    IconButton(
+        onClick = onClick,
+        interactionSource = press.interactionSource,
+        modifier = press.modifier.then(modifier),
+        content = content,
+    )
+}
+
+/**
+ * A horizontal rocker bar: decrement on the left, increment on the right, an optional action (or
+ * just the label) in the middle. Thumb-friendly full-width targets under the D-pad.
+ */
+@Composable
+private fun HorizontalRocker(
     label: String,
-    topIcon: ImageVector,
-    bottomIcon: ImageVector,
-    onTop: () -> Unit,
-    onBottom: () -> Unit,
+    leadingIcon: ImageVector,
+    trailingIcon: ImageVector,
+    onLeading: () -> Unit,
+    onTrailing: () -> Unit,
     onMiddle: (() -> Unit)?,
     middleIcon: ImageVector?,
+    modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = Modifier
-            .width(56.dp)
-            .neuRaised(cornerRadius = 28.dp)
-            .clip(RoundedCornerShape(28.dp))
+    Row(
+        modifier = modifier
+            .height(60.dp)
+            .neuRaised(cornerRadius = 30.dp)
+            .clip(RoundedCornerShape(30.dp))
             .background(neuSurfaceBrush())
-            .padding(vertical = Spacing.sm),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+            // The segment IconButtons are narrower than the bar, leaving dead strips at the
+            // edges and in the gaps; this routes those taps to the segment third they fall in.
+            .pointerInput(onMiddle != null) {
+                detectTapGestures { offset ->
+                    val third = offset.x / size.width
+                    when {
+                        third < 1 / 3f -> onLeading()
+                        third > 2 / 3f -> onTrailing()
+                        onMiddle != null -> onMiddle()
+                        third < 0.5f -> onLeading()
+                        else -> onTrailing()
+                    }
+                }
+            }
+            .padding(horizontal = Spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        IconButton(onClick = onTop, modifier = Modifier.size(44.dp)) {
-            Icon(topIcon, contentDescription = "$label up", tint = Neu.Content, modifier = Modifier.size(24.dp))
+        PressIconButton(onClick = onLeading, modifier = Modifier.size(44.dp)) {
+            Icon(leadingIcon, contentDescription = "$label down", tint = Neu.Content, modifier = Modifier.size(24.dp))
         }
         if (onMiddle != null && middleIcon != null) {
-            IconButton(onClick = onMiddle, modifier = Modifier.size(36.dp)) {
+            PressIconButton(onClick = onMiddle, modifier = Modifier.size(36.dp)) {
                 Icon(middleIcon, contentDescription = "Mute", tint = Neu.ContentDim, modifier = Modifier.size(20.dp))
             }
         } else {
@@ -348,8 +453,8 @@ private fun RockerPill(
                 Text(label, color = Neu.ContentDim, style = MaterialTheme.typography.labelMedium)
             }
         }
-        IconButton(onClick = onBottom, modifier = Modifier.size(44.dp)) {
-            Icon(bottomIcon, contentDescription = "$label down", tint = Neu.Content, modifier = Modifier.size(24.dp))
+        PressIconButton(onClick = onTrailing, modifier = Modifier.size(44.dp)) {
+            Icon(trailingIcon, contentDescription = "$label up", tint = Neu.Content, modifier = Modifier.size(24.dp))
         }
     }
 }
@@ -371,7 +476,7 @@ private fun MediaRow(onKey: (RemoteKey) -> Unit) {
             Icon(
                 Icons.Filled.PlayArrow,
                 contentDescription = "Play/Pause",
-                tint = Neu.Content,
+                tint = Neu.Positive,
                 modifier = Modifier.size(26.dp),
             )
         }
@@ -563,16 +668,36 @@ private fun TouchpadSurface(onKey: (RemoteKey) -> Unit) {
  */
 @Composable
 private fun KeyboardInput(onKey: (RemoteKey) -> Unit, onText: (String) -> Unit) {
+    // The field updates on every keystroke for a responsive feel; [synced] tracks what the TV has
+    // actually received. The sheet starts fresh on every open. The field only ever holds
+    // characters the wire protocol can type (see [typeableOnTv]) — anything else would be silently
+    // dropped TV-side, desyncing the mirror: later diffs would then send too many BACKSPACEs, and
+    // a BACKSPACE landing on an already-empty TV field navigates back on most TVs.
     var text by remember { mutableStateOf("") }
-    // What the TV has received so far this session; the sheet starts fresh on every open.
     var synced by remember { mutableStateOf("") }
-    val sync: (String) -> Unit = { value ->
-        val prefix = synced.commonPrefixWith(value)
-        repeat(synced.length - prefix.length) { onKey(RemoteKey.BACKSPACE) }
-        if (value.length > prefix.length) onText(value.substring(prefix.length))
-        synced = value
-        text = value
+
+    // Debounced mirror: a burst of fast typing is coalesced into a single diff rather than one
+    // network command per character, so a flaky TV link isn't flooded and stays connected. The diff
+    // sends removed characters as BACKSPACE and added ones as literal text, so edits behave exactly
+    // like typing on the TV itself.
+    //
+    // One sequential collector (not an effect keyed on the text) because a keyed effect restarts on
+    // every keystroke and can be cancelled BETWEEN emitting keys and recording [synced] — the next
+    // diff then re-sends from a stale baseline and the TV ends up with duplicated/over-deleted
+    // text. Here cancellation can only land on the delay: past it there are no suspension points,
+    // so the emit + [synced] update always complete as one atomic step.
+    LaunchedEffect(Unit) {
+        snapshotFlow { text }.collectLatest { value ->
+            if (value == synced) return@collectLatest
+            delay(MIRROR_DEBOUNCE_MS)
+            val target = text
+            val prefix = synced.commonPrefixWith(target)
+            repeat(synced.length - prefix.length) { onKey(RemoteKey.BACKSPACE) }
+            if (target.length > prefix.length) onText(target.substring(prefix.length))
+            synced = target
+        }
     }
+
     val speechLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -580,51 +705,133 @@ private fun KeyboardInput(onKey: (RemoteKey) -> Unit, onText: (String) -> Unit) 
             result.data
                 ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                 ?.firstOrNull()
-                ?.let(sync)
+                ?.let { text = it.filter(::typeableOnTv) }
         }
     }
-    Text("Wireless keyboard", style = MaterialTheme.typography.titleMedium, color = Neu.Content)
+
+    // Focus the field once the sheet has animated in, so the system keyboard rises with it as one
+    // deliberate motion instead of the user hunting for the field to pop it separately.
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(180)
+        runCatching { focusRequester.requestFocus() }
+    }
+
+    // Typing already mirrors live, so "send" means confirm: ENTER submits the TV's focused field
+    // (search box, login form…) exactly like the enter key of a keyboard docked to the TV.
+    val send: () -> Unit = { onKey(RemoteKey.ENTER) }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Wireless keyboard", style = MaterialTheme.typography.titleMedium, color = Neu.Content)
+        // Keys only land in a focused text box; this jumps the TV to its search screen, which
+        // focuses one — the one-tap remedy when typing seems to do nothing (or navigates!).
+        TextButton(onClick = { onKey(RemoteKey.SEARCH) }) {
+            Icon(
+                Icons.Filled.Search,
+                contentDescription = null,
+                tint = Neu.Accent,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(Spacing.xs))
+            Text("TV search", color = Neu.Accent, style = MaterialTheme.typography.labelLarge)
+        }
+    }
     Spacer(Modifier.height(Spacing.sm))
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
             value = text,
-            onValueChange = sync,
-            modifier = Modifier.weight(1f),
+            onValueChange = { text = it.filter(::typeableOnTv) },
+            modifier = Modifier.weight(1f).focusRequester(focusRequester),
             singleLine = true,
-            placeholder = { Text("Type here — it appears on the TV") },
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            shape = RoundedCornerShape(16.dp),
+            leadingIcon = { Icon(Icons.Filled.Keyboard, contentDescription = null) },
+            placeholder = { Text("Type to your TV…") },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(onSend = { send() }),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Neu.Accent,
+                unfocusedBorderColor = Neu.SurfaceLight,
+                cursorColor = Neu.Accent,
+                focusedTextColor = Neu.Content,
+                unfocusedTextColor = Neu.Content,
+                focusedContainerColor = Neu.SurfaceDark,
+                unfocusedContainerColor = Neu.SurfaceDark,
+                focusedPlaceholderColor = Neu.ContentDim,
+                unfocusedPlaceholderColor = Neu.ContentDim,
+                focusedLeadingIconColor = Neu.Accent,
+                unfocusedLeadingIconColor = Neu.ContentDim,
+                focusedTrailingIconColor = Neu.ContentDim,
+                unfocusedTrailingIconColor = Neu.ContentDim,
+            ),
             trailingIcon = {
                 if (text.isNotEmpty()) {
-                    IconButton(onClick = { sync("") }) {
+                    IconButton(onClick = { text = "" }) {
                         Icon(Icons.Filled.Clear, contentDescription = "Clear text on the TV too")
                     }
                 }
             },
         )
         Spacer(Modifier.width(Spacing.sm))
-        FilledTonalIconButton(
-            onClick = {
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                    .putExtra(
-                        RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
-                    )
-                    .putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to type on the TV")
-                // Devices without a speech recognizer just no-op instead of crashing.
-                runCatching { speechLauncher.launch(intent) }
-            },
-            modifier = Modifier.size(56.dp),
-        ) {
-            Icon(Icons.Filled.Mic, contentDescription = "Voice input")
+        // Empty field: dictate with the mic. Once there's text, the slot becomes the accent send
+        // button that confirms it on the TV.
+        Crossfade(targetState = text.isEmpty(), label = "micToSend") { empty ->
+            if (empty) {
+                val press = rememberPressFeedback()
+                FilledTonalIconButton(
+                    onClick = {
+                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                            .putExtra(
+                                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
+                            )
+                            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to type on the TV")
+                        // Devices without a speech recognizer just no-op instead of crashing.
+                        runCatching { speechLauncher.launch(intent) }
+                    },
+                    interactionSource = press.interactionSource,
+                    modifier = press.modifier.size(56.dp),
+                ) {
+                    Icon(Icons.Filled.Mic, contentDescription = "Voice input")
+                }
+            } else {
+                val press = rememberPressFeedback()
+                FilledTonalIconButton(
+                    onClick = send,
+                    interactionSource = press.interactionSource,
+                    modifier = press.modifier.size(56.dp),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = Neu.Accent,
+                        contentColor = Color.White,
+                    ),
+                ) {
+                    Icon(Icons.Filled.Send, contentDescription = "Send to TV")
+                }
+            }
         }
     }
     Spacer(Modifier.height(Spacing.xs))
     Text(
-        "Every change is sent to the TV instantly",
+        "Mirrors to the TV as you type — letters, numbers and . , @ # punctuation. " +
+            "If nothing appears, tap TV search first.",
         style = MaterialTheme.typography.labelMedium,
         color = Neu.ContentDim,
     )
 }
+
+/**
+ * Characters the Android TV wire protocol can type as a plain (unshifted) key press — the only
+ * ones allowed into the keyboard field. Must stay in sync with `AndroidTvProtocol.charKeyCode`;
+ * letting an unsendable character in silently desyncs the phone-side mirror from the TV.
+ */
+private const val TV_TYPEABLE_PUNCTUATION = " *#,.`-=[]\\;'/@+"
+
+private fun typeableOnTv(character: Char): Boolean =
+    character in 'a'..'z' || character in 'A'..'Z' || character in '0'..'9' ||
+        character in TV_TYPEABLE_PUNCTUATION
 
 @Composable
 private fun NumberPadGrid(onKey: (RemoteKey) -> Unit) {
@@ -660,6 +867,12 @@ private fun NumberButton(label: String, key: RemoteKey, onKey: (RemoteKey) -> Un
 
 /** Finger travel (in dp) that advances the touchpad one D-pad step. */
 private const val TOUCHPAD_STEP_DP = 44
+
+/** Ceiling for the D-pad circle so it fills small phones edge-to-edge without dwarfing tablets. */
+private val DPAD_MAX_DIAMETER = 320.dp
+
+/** Pause after the last keystroke before the keyboard mirror diffs and transmits. */
+private const val MIRROR_DEBOUNCE_MS = 90L
 
 @Composable
 internal fun SectionCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {

@@ -35,10 +35,17 @@ internal object Neu {
     val Content = Color(0xFFE3E6EA)
     val ContentDim = Color(0xFF959CA5)
     val PowerRed = Color(0xFFE5484D)
+    // Electric-blue accent for the hero controls (OK / D-pad ring) and a green for Play.
+    val Accent = Color(0xFF3D8BFF)
+    val AccentDark = Color(0xFF2F6FE0)
+    val Positive = Color(0xFF3DDC84)
 }
 
 /** The subtle top-light gradient that makes a raised surface read as convex. */
 internal fun neuSurfaceBrush(): Brush = Brush.linearGradient(listOf(Neu.SurfaceLight, Neu.SurfaceDark))
+
+/** The accent variant of [neuSurfaceBrush] for the electric-blue hero controls. */
+internal fun neuAccentBrush(): Brush = Brush.linearGradient(listOf(Neu.Accent, Neu.AccentDark))
 
 /**
  * Soft-neumorphism: a blurred light shadow up-left and a blurred dark shadow down-right, so the
@@ -81,17 +88,20 @@ internal fun NeuButton(
 ) {
     val press = rememberPressFeedback()
     Box(
+        // clickable sits before clip: clip restricts hit-testing of everything after it to the
+        // shape, which left the corners of round buttons dead. The full layout box stays tappable
+        // while the drawn surface is still clipped to the shape.
         modifier = press.modifier
             .then(modifier)
             .neuRaised(cornerRadius)
-            .clip(shape)
-            .background(background)
             .clickable(
                 interactionSource = press.interactionSource,
                 indication = null,
                 onClickLabel = label,
                 onClick = onClick,
-            ),
+            )
+            .clip(shape)
+            .background(background),
         contentAlignment = Alignment.Center,
         content = content,
     )
