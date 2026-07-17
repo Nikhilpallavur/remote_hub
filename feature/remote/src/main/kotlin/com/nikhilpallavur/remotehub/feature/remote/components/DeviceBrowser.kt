@@ -17,10 +17,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.SettingsRemote
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -33,6 +35,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -97,6 +100,20 @@ fun DeviceBrowser(
 
     var tab by rememberSaveable { mutableStateOf(BrowserTab.WIFI) }
 
+    // Forgetting is destructive (a paired TV needs the PIN dance again), so rows only *request*
+    // it and one shared dialog does the confirming.
+    var pendingForget by remember { mutableStateOf<RemoteDevice?>(null) }
+    pendingForget?.let { device ->
+        ForgetDeviceDialog(
+            device = device,
+            onConfirm = {
+                onForget(device)
+                pendingForget = null
+            },
+            onDismiss = { pendingForget = null },
+        )
+    }
+
     Column(modifier = modifier.fillMaxWidth()) {
         TabRow(selectedTabIndex = tab.ordinal) {
             BrowserTab.entries.forEach { candidate ->
@@ -125,6 +142,7 @@ fun DeviceBrowser(
                     onScan = onScan,
                     onAddManual = onAddManual,
                     onFavorite = onFavorite,
+                    onForgetRequest = { pendingForget = it },
                     contentPadding = contentPadding,
                 )
                 BrowserTab.INFRARED -> InfraredTab(
@@ -134,6 +152,7 @@ fun DeviceBrowser(
                     onConnect = onConnect,
                     onConnectDriver = onConnectDriver,
                     onFavorite = onFavorite,
+                    onForgetRequest = { pendingForget = it },
                     contentPadding = contentPadding,
                 )
             }
@@ -149,6 +168,7 @@ private fun WifiTab(
     onScan: () -> Unit,
     onAddManual: () -> Unit,
     onFavorite: (RemoteDevice) -> Unit,
+    onForgetRequest: (RemoteDevice) -> Unit,
     contentPadding: PaddingValues,
 ) {
     LazyColumn(
@@ -166,6 +186,7 @@ private fun WifiTab(
                     saved = true,
                     onConnect = { onConnect(device) },
                     onFavorite = { onFavorite(device) },
+                    onForgetRequest = { onForgetRequest(device) },
                     modifier = Modifier.animateItem(),
                 )
             }
@@ -181,6 +202,7 @@ private fun WifiTab(
                     saved = false,
                     onConnect = { onConnect(device) },
                     onFavorite = {},
+                    onForgetRequest = {},
                     modifier = Modifier.animateItem(),
                 )
             }
@@ -207,6 +229,7 @@ private fun InfraredTab(
     onConnect: (RemoteDevice) -> Unit,
     onConnectDriver: (String) -> Unit,
     onFavorite: (RemoteDevice) -> Unit,
+    onForgetRequest: (RemoteDevice) -> Unit,
     contentPadding: PaddingValues,
 ) {
     LazyColumn(
@@ -224,6 +247,7 @@ private fun InfraredTab(
                     saved = true,
                     onConnect = { onConnect(device) },
                     onFavorite = { onFavorite(device) },
+                    onForgetRequest = { onForgetRequest(device) },
                     modifier = Modifier.animateItem(),
                 )
             }
@@ -323,6 +347,7 @@ private fun DeviceRow(
     saved: Boolean,
     onConnect: () -> Unit,
     onFavorite: () -> Unit,
+    onForgetRequest: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BrowserRow(
@@ -346,10 +371,49 @@ private fun DeviceRow(
                     },
                 )
             }
+            IconButton(onClick = onForgetRequest) {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = "Forget ${device.name}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         } else {
             TrailingChevron()
         }
     }
+}
+
+/** Confirms forgetting a saved device — destructive, since paired devices must re-pair to return. */
+@Composable
+private fun ForgetDeviceDialog(
+    device: RemoteDevice,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+        title = { Text("Forget ${device.name}?") },
+        text = {
+            Text(
+                if (device.paired) {
+                    "It will be removed from your saved devices, and you'll need to pair with it " +
+                        "again to reconnect."
+                } else {
+                    "It will be removed from your saved devices."
+                },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("Forget", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 /** Hostless infrared remote driven by the phone's own blaster — one tap to use. */
